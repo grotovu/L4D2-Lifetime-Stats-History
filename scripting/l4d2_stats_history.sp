@@ -1,5 +1,6 @@
 /*
 *	Stats History (Lifetime Tracker)
+*   Developed with the help of AI assistance.
 */
 
 #define PLUGIN_VERSION		"1.0.0"
