@@ -279,6 +279,7 @@ int g_iPendingSkeetAttacker[MAXPLAYERS + 1];
 
 bool g_bTankAlive[MAXPLAYERS + 1];
 int  g_iTankLastHealth[MAXPLAYERS + 1];
+bool g_bRockSkeeted[MAX_ENTITIES_TRACKED];
 
 int  g_iWitchDamageAwarded[MAX_ENTITIES_TRACKED];
 int g_iWitchFirstHitTick[MAX_ENTITIES_TRACKED];
@@ -1701,6 +1702,9 @@ public void OnEntityCreated(int entity, const char[] classname)
     
     if (classname[0] == 't' && StrEqual(classname, "tank_rock"))
     {
+        if (entity > 0 && entity < MAX_ENTITIES_TRACKED) {
+            g_bRockSkeeted[entity] = false;
+        }
         SDKHook(entity, SDKHook_OnTakeDamage, OnRockTakeDamage);
     }
 }
@@ -1713,6 +1717,7 @@ public void OnEntityDestroyed(int entity)
         g_iWitchFirstHitTick[entity] = 0;
         g_bIsWitchHeadshot[entity] = false;
         g_bIsWitchEntity[entity] = false;
+		g_bRockSkeeted[entity] = false;
     }
 }
 
@@ -1900,10 +1905,15 @@ public Action OnRockTakeDamage(int victim, int &attacker, int &inflictor, float 
 {
     if (attacker <= 0 || attacker > MaxClients || !IsClientInGame(attacker)) return Plugin_Continue;
     if (!IsSurvivor(attacker)) return Plugin_Continue;
+    
+    if (victim <= 0 || victim >= MAX_ENTITIES_TRACKED || g_bRockSkeeted[victim]) return Plugin_Continue;
 
     int health = GetEntProp(victim, Prop_Data, "m_iHealth");
+    if (health <= 0) return Plugin_Continue;
+
     if (damage >= health)
     {
+        g_bRockSkeeted[victim] = true;
         ADD_STAT(attacker, rockSkeets);
         
         char clean[64];
@@ -3723,7 +3733,12 @@ void GenerateCampaignPrintFile(int client)
                 if (wS.kills == 0 && wS.fired == 0) continue;
                 if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
                 GetPrettyWeaponName(key, prettyWPN, sizeof(prettyWPN));
-                Format(lineBuffer, sizeof(lineBuffer), "    -> %-20s: %d Kills (Fired: %-5d | Hits: %-5d | HS: %-5d)", prettyWPN, wS.kills, wS.fired, wS.hits, wS.headshots);
+
+                float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
+                if (acc > 100.0) acc = 100.0;
+
+                Format(lineBuffer, sizeof(lineBuffer), "    -> %-20s: %d Kills (Fired: %-5d | Hits: %-5d | Acc: %-5.1f%% | HS: %-5d)", 
+                    prettyWPN, wS.kills, wS.fired, wS.hits, acc, wS.headshots);
                 hFile.WriteLine(lineBuffer);
             }
 
@@ -3936,7 +3951,12 @@ public Action CmdShowBotsCampaignHistory(int client, int args)
                 if (wS.kills == 0 && wS.fired == 0) continue;
                 if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
                 GetPrettyWeaponName(key, prettyWPN, sizeof(prettyWPN));
-                PrintToConsole(client, "    -> %-20s: %d Kills (Fired: %-5d | Hits: %-5d | HS: %-5d)", prettyWPN, wS.kills, wS.fired, wS.hits, wS.headshots);
+
+                float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
+                if (acc > 100.0) acc = 100.0;
+
+                PrintToConsole(client, "    -> %-20s: %d Kills (Fired: %-5d | Hits: %-5d | Acc: %-5.1f%% | HS: %-5d)", 
+                    prettyWPN, wS.kills, wS.fired, wS.hits, acc, wS.headshots);
             }
 
             if (g_cvPrintDamageReceived.BoolValue) {
