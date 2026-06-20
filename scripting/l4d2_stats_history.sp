@@ -1295,32 +1295,29 @@ void Event_WeaponFire(Event event, const char[] name, bool dontBroadcast) {
     int weaponID = g_iClientActiveWeaponID[client];
     if (weaponID != -1) {
         UpdateWeaponStatID(client, weaponID, 0);
-        
-        char rawWeapon[64];
-		event.GetString("weapon", rawWeapon, sizeof(rawWeapon));
-		
-		char rawClean[64];
-		if (strncmp(rawWeapon, "weapon_", 7) == 0)
-		{
-			strcopy(rawClean, sizeof(rawClean), rawWeapon[7]);
-		}
-		else
-		{
-			strcopy(rawClean, sizeof(rawClean), rawWeapon);
-		}
-		
-		if (StrEqual(rawClean, "molotov"))
-		{
-			ADD_STAT(client, molotovsThrown);
-		}
-		else if (StrEqual(rawClean, "pipe_bomb"))
-		{
-			ADD_STAT(client, pipesThrown);
-		}
-		else if (StrEqual(rawClean, "vomitjar"))
-		{
-			ADD_STAT(client, bilesThrown);
-		}
+    }
+    
+    char weapon[64];
+    event.GetString("weapon", weapon, sizeof(weapon));
+    
+    int idx = (weapon[0] == 'w' && strncmp(weapon, "weapon_", 7) == 0) ? 7 : 0;
+    
+    switch (weapon[idx]) {
+        case 'm': {
+            if (strcmp(weapon[idx], "molotov") == 0) {
+                ADD_STAT(client, molotovsThrown);
+            }
+        }
+        case 'p': {
+            if (strcmp(weapon[idx], "pipe_bomb") == 0) {
+                ADD_STAT(client, pipesThrown);
+            }
+        }
+        case 'v': {
+            if (strcmp(weapon[idx], "vomitjar") == 0) {
+                ADD_STAT(client, bilesThrown);
+            }
+        }
     }
 }
 
