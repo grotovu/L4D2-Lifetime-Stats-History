@@ -2886,140 +2886,19 @@ public Action CmdShowCampaignHistory(int client, int args)
 public Action CmdExportHistory(int client, int args)
 {
     if (!IsValidClient(client) || !g_bStatsLoaded[client]) return Plugin_Handled;
-	
-    FlushKillsCache(client);
-	
-    char sPath[PLATFORM_MAX_PATH], auth[64];
-    GetClientAuthId(client, AuthId_SteamID64, auth, sizeof(auth));
-    char safeAuth[64]; strcopy(safeAuth, sizeof(safeAuth), auth); ReplaceString(safeAuth, sizeof(safeAuth), ":", "_");
-	
+
     char sSaveLabel[64];
-	
     if (args >= 1) {
         GetCmdArg(1, sSaveLabel, sizeof(sSaveLabel));
-        SanitizeFileName(sSaveLabel, sizeof(sSaveLabel));
     } else {
         FormatTime(sSaveLabel, sizeof(sSaveLabel), "%Y%m%d_%H%M%S");
     }
-	
-    BuildPath(Path_SM, sPath, sizeof(sPath), "logs/stats_history/Export_%s_%s.cfg", safeAuth, sSaveLabel);
 
-    KeyValues exportKV = new KeyValues("StatsHistory");
-    exportKV.JumpToKey(auth, true);
-
-    exportKV.SetNum("seconds_played", g_Lifetime[client].totalSeconds);
-    exportKV.SetNum("campaigns_played", g_Lifetime[client].campaignsPlayed);
-    exportKV.SetNum("campaigns_won", g_Lifetime[client].campaignsWon);
-    exportKV.SetNum("restarts", g_Lifetime[client].totalRestarts);
-	exportKV.SetNum("incaps", g_Lifetime[client].incaps);
-    exportKV.SetNum("deaths", g_Lifetime[client].deaths);
-    exportKV.SetNum("medkits_used", g_Lifetime[client].medkitsUsed);
-    exportKV.SetNum("medkits_shared", g_Lifetime[client].medkitsShared);
-    exportKV.SetNum("healed_by_teammate", g_Lifetime[client].healedByTeammate);
-    exportKV.SetNum("pills_used", g_Lifetime[client].pillsUsed);
-    exportKV.SetNum("pills_shared", g_Lifetime[client].pillsShared);
-    exportKV.SetNum("adrenaline_used", g_Lifetime[client].adrenalineUsed);
-    exportKV.SetNum("adrenaline_shared", g_Lifetime[client].adrenalineShared);
-    exportKV.SetNum("defibs_used", g_Lifetime[client].defibsUsed);
-    exportKV.SetNum("defibbed_by_teammate", g_Lifetime[client].defibbedByTeammate);
-    exportKV.SetNum("revives_total", g_Lifetime[client].revivesTotal);
-    exportKV.SetNum("revives_record", g_Lifetime[client].revivesRecord);
-    exportKV.SetNum("revived_by_teammate", g_Lifetime[client].revivedByTeammate);
-    exportKV.SetNum("revived_by_teammate_record", g_Lifetime[client].revivedByTeammateRecord);
-    exportKV.SetNum("protections_total", g_Lifetime[client].protectionsTotal);
-    exportKV.SetNum("protections_record", g_Lifetime[client].protectionsRecord);
-    exportKV.SetNum("protected_by_teammate", g_Lifetime[client].protectedByTeammate);
-    exportKV.SetNum("protected_by_teammate_record", g_Lifetime[client].protectedByTeammateRecord);
-	exportKV.SetNum("ledge_grabs", g_Lifetime[client].ledgeGrabs);
-    exportKV.SetNum("ledge_rescues", g_Lifetime[client].ledgeRescues);
-    exportKV.SetNum("ff_damage_total", g_Lifetime[client].ffDamageTotal);
-    exportKV.SetNum("ff_damage_record", g_Lifetime[client].ffDamageRecord);
-    exportKV.SetNum("ff_received_total", g_Lifetime[client].ffReceivedTotal);
-    exportKV.SetNum("ff_received_record", g_Lifetime[client].ffReceivedRecord);
-    exportKV.SetNum("molotovs_thrown", g_Lifetime[client].molotovsThrown);
-    exportKV.SetNum("molotov_kills", g_Lifetime[client].molotovKills);
-    exportKV.SetNum("pipes_thrown", g_Lifetime[client].pipesThrown);
-    exportKV.SetNum("pipe_kills", g_Lifetime[client].pipeKills);
-    exportKV.SetNum("biles_thrown", g_Lifetime[client].bilesThrown);
-    exportKV.SetNum("bile_hits", g_Lifetime[client].bileHits);
-    exportKV.SetNum("kills_common", g_Lifetime[client].killsCommon);
-    exportKV.SetNum("kills_tank", g_Lifetime[client].killsTank);
-    exportKV.SetNum("kills_witch", g_Lifetime[client].killsWitch);
-    exportKV.SetNum("kills_smoker", g_Lifetime[client].killsSmoker);
-    exportKV.SetNum("kills_hunter", g_Lifetime[client].killsHunter);
-    exportKV.SetNum("kills_boomer", g_Lifetime[client].killsBoomer);
-    exportKV.SetNum("kills_charger", g_Lifetime[client].killsCharger);
-    exportKV.SetNum("kills_jockey", g_Lifetime[client].killsJockey);
-    exportKV.SetNum("kills_spitter", g_Lifetime[client].killsSpitter);
-    exportKV.SetNum("tank_damage", g_Lifetime[client].tankDamage);
-    exportKV.SetNum("witch_damage", g_Lifetime[client].witchDamage);
-    exportKV.SetNum("hunter_skeets", g_Lifetime[client].hunterSkeets);
-    exportKV.SetNum("witch_crowns", g_Lifetime[client].witchCrowns);
-    exportKV.SetNum("tongue_cuts", g_Lifetime[client].tongueCuts);
-	exportKV.SetNum("self_rescues", g_Lifetime[client].selfRescues);    
-    exportKV.SetNum("charger_levels", g_Lifetime[client].chargerLevels);
-    exportKV.SetNum("rock_skeets", g_Lifetime[client].rockSkeets);
-    exportKV.SetNum("spitter_killed_pre_spat", g_Lifetime[client].spitterKilledPreSpat);
-    exportKV.SetNum("jockey_deadstops", g_Lifetime[client].jockeyDeadstops);
-    exportKV.SetNum("hunter_deadstops", g_Lifetime[client].hunterDeadstops);
-	exportKV.SetNum("witches_startled", g_Lifetime[client].witchesStartled);
-    exportKV.SetNum("times_boomed", g_Lifetime[client].timesBoomed);
-
-    if (exportKV.JumpToKey("Weapons", true)) {
-        for (int i = 0; i < g_iCleanWeaponCount; i++) {
-            char wName[64];
-            strcopy(wName, sizeof(wName), g_sCleanWeaponNames[i]);
-
-            WeaponStats wS;
-			wS = g_WeaponLifetimeCache[client][i];
-            if (wS.fired == 0 && wS.kills == 0) continue;
-
-            if (exportKV.JumpToKey(wName, true)) {
-                exportKV.SetNum("fired", wS.fired);
-                exportKV.SetNum("hits", wS.hits);
-                exportKV.SetNum("kills", wS.kills);
-                exportKV.SetNum("headshots", wS.headshots);
-                exportKV.SetNum("kills_common", wS.killsCommon);
-                exportKV.SetNum("kills_smoker", wS.killsSmoker);
-                exportKV.SetNum("kills_boomer", wS.killsBoomer);
-                exportKV.SetNum("kills_hunter", wS.killsHunter);
-                exportKV.SetNum("kills_spitter", wS.killsSpitter);
-                exportKV.SetNum("kills_jockey", wS.killsJockey);
-                exportKV.SetNum("kills_charger", wS.killsCharger);
-                exportKV.SetNum("kills_tank", wS.killsTank);
-                exportKV.SetNum("kills_witch", wS.killsWitch);
-                exportKV.SetNum("tank_damage", wS.tankDamage);
-                exportKV.SetNum("witch_damage", wS.witchDamage);
-                exportKV.SetNum("hunter_skeets", wS.hunterSkeets);
-                exportKV.SetNum("witch_crowns", wS.witchCrowns);
-                exportKV.SetNum("tongue_cuts", wS.tongueCuts);
-                exportKV.SetNum("charger_levels", wS.chargerLevels);
-                exportKV.SetNum("rock_skeets", wS.rockSkeets);
-                exportKV.SetNum("spitter_killed_pre_spat", wS.spitterKilledPreSpat);
-                exportKV.GoBack();
-            }
-        }
-        exportKV.GoBack();
+    if (ExportPlayerStatsToFile(client, sSaveLabel)) {
+        PrintToChat(client, "\x04[Stats] \x01Savestate exported with label: \x05%s", sSaveLabel);
+    } else {
+        PrintToChat(client, "\x04[Stats] \x01Failed to export your stats history.");
     }
-
-    if (exportKV.JumpToKey("DamageReceived", true)) {
-        for (int i = 0; i < MAX_DMG_SOURCES; i++) {
-            int dmgVal = g_iDamageLifetimeCache[client][i];
-            if (dmgVal == 0) continue;
-            
-            if (exportKV.JumpToKey(g_sDamageSourceKeys[i], true)) {
-                exportKV.SetNum("damage", dmgVal);
-                exportKV.GoBack();
-            }
-        }
-        exportKV.GoBack();
-    }
-
-    exportKV.Rewind(); 
-    exportKV.ExportToFile(sPath); 
-    delete exportKV;
-
-    PrintToChat(client, "\x04[Stats] \x01Savestate exported to: \x05%s", sPath);
     return Plugin_Handled;
 }
 
@@ -3865,6 +3744,21 @@ public Action CmdResetHistory(int client, int args)
         return Plugin_Handled;
     }
 
+    char sTime[32];
+    FormatTime(sTime, sizeof(sTime), "%Y%m%d_%H%M%S");
+    
+    char sGlobalBackupLabel[64];
+    Format(sGlobalBackupLabel, sizeof(sGlobalBackupLabel), "GlobalResetBackup_%s", sTime);
+
+    for (int i = 1; i <= MaxClients; i++) {
+        if (IsValidClient(i) && g_bStatsLoaded[i]) {
+            if (ExportPlayerStatsToFile(i, sGlobalBackupLabel)) {
+                PrintToChat(i, "\x04[Stats] \x01The host is resetting database statistics.");
+                PrintToChat(i, "\x04[Stats] \x01Your active stats were backed up under label: \x05%s", sGlobalBackupLabel);
+            }
+        }
+    }
+
     g_hDatabase.Query(SQL_Callback_Reset, "DELETE FROM player_stats;");
     g_hDatabase.Query(SQL_Callback_Reset, "DELETE FROM weapon_stats;");
     g_hDatabase.Query(SQL_Callback_Reset, "DELETE FROM damage_received_stats;");
@@ -3930,13 +3824,26 @@ public Action CmdResetStatsForMe(int client, int args)
         return Plugin_Handled;
     }
 
+    char sTime[32];
+    FormatTime(sTime, sizeof(sTime), "%Y%m%d_%H%M%S");
+    
+    char sBackupLabel[64];
+    Format(sBackupLabel, sizeof(sBackupLabel), "BackupBeforeReset_%s", sTime);
+
+    if (ExportPlayerStatsToFile(client, sBackupLabel)) {
+        PrintToChat(client, "\x04[Stats] \x01An automatic backup has been created: \x05%s", sBackupLabel);
+        PrintToChat(client, "\x04[Stats] \x01To restore these stats later, type: \x03!importstatshistory %s", sBackupLabel);
+    } else {
+        PrintToChat(client, "\x04[Stats] \x01Warning: Failed to create a safety backup before resetting.");
+    }
+
     char sQuery[256];
     g_hDatabase.Format(sQuery, sizeof(sQuery), "DELETE FROM player_stats WHERE steamid = '%s';", auth);
     SQL_TQuery(g_hDatabase, SQL_Callback_GenericError, sQuery);
 
     g_hDatabase.Format(sQuery, sizeof(sQuery), "DELETE FROM weapon_stats WHERE steamid = '%s';", auth);
     SQL_TQuery(g_hDatabase, SQL_Callback_GenericError, sQuery);
-	
+    
     g_hDatabase.Format(sQuery, sizeof(sQuery), "DELETE FROM damage_received_stats WHERE steamid = '%s';", auth);
     SQL_TQuery(g_hDatabase, SQL_Callback_GenericError, sQuery);
 
@@ -4344,6 +4251,143 @@ void RestoreCampaignStats(int client, const char[] auth)
 
     g_kvCampaignCache.Rewind();
     g_kvCampaignCache.DeleteKey(auth);
+}
+
+bool ExportPlayerStatsToFile(int client, const char[] label)
+{
+    if (!IsValidClient(client) || !g_bStatsLoaded[client]) return false;
+
+    FlushKillsCache(client);
+
+    char sPath[PLATFORM_MAX_PATH], auth[64];
+    GetClientAuthId(client, AuthId_SteamID64, auth, sizeof(auth));
+    
+    char safeAuth[64]; 
+    strcopy(safeAuth, sizeof(safeAuth), auth); 
+    ReplaceString(safeAuth, sizeof(safeAuth), ":", "_");
+
+    char sanitizedLabel[64];
+    strcopy(sanitizedLabel, sizeof(sanitizedLabel), label);
+    SanitizeFileName(sanitizedLabel, sizeof(sanitizedLabel));
+
+    BuildPath(Path_SM, sPath, sizeof(sPath), "logs/stats_history/Export_%s_%s.cfg", safeAuth, sanitizedLabel);
+
+    KeyValues exportKV = new KeyValues("StatsHistory");
+    exportKV.JumpToKey(auth, true);
+
+    exportKV.SetNum("seconds_played", g_Lifetime[client].totalSeconds);
+    exportKV.SetNum("campaigns_played", g_Lifetime[client].campaignsPlayed);
+    exportKV.SetNum("campaigns_won", g_Lifetime[client].campaignsWon);
+    exportKV.SetNum("restarts", g_Lifetime[client].totalRestarts);
+    exportKV.SetNum("incaps", g_Lifetime[client].incaps);
+    exportKV.SetNum("deaths", g_Lifetime[client].deaths);
+    exportKV.SetNum("medkits_used", g_Lifetime[client].medkitsUsed);
+    exportKV.SetNum("medkits_shared", g_Lifetime[client].medkitsShared);
+    exportKV.SetNum("healed_by_teammate", g_Lifetime[client].healedByTeammate);
+    exportKV.SetNum("pills_used", g_Lifetime[client].pillsUsed);
+    exportKV.SetNum("pills_shared", g_Lifetime[client].pillsShared);
+    exportKV.SetNum("adrenaline_used", g_Lifetime[client].adrenalineUsed);
+    exportKV.SetNum("adrenaline_shared", g_Lifetime[client].adrenalineShared);
+    exportKV.SetNum("defibs_used", g_Lifetime[client].defibsUsed);
+    exportKV.SetNum("defibbed_by_teammate", g_Lifetime[client].defibbedByTeammate);
+    exportKV.SetNum("revives_total", g_Lifetime[client].revivesTotal);
+    exportKV.SetNum("revives_record", g_Lifetime[client].revivesRecord);
+    exportKV.SetNum("revived_by_teammate", g_Lifetime[client].revivedByTeammate);
+    exportKV.SetNum("revived_by_teammate_record", g_Lifetime[client].revivedByTeammateRecord);
+    exportKV.SetNum("protections_total", g_Lifetime[client].protectionsTotal);
+    exportKV.SetNum("protections_record", g_Lifetime[client].protectionsRecord);
+    exportKV.SetNum("protected_by_teammate", g_Lifetime[client].protectedByTeammate);
+    exportKV.SetNum("protected_by_teammate_record", g_Lifetime[client].protectedByTeammateRecord);
+    exportKV.SetNum("ledge_grabs", g_Lifetime[client].ledgeGrabs);
+    exportKV.SetNum("ledge_rescues", g_Lifetime[client].ledgeRescues);
+    exportKV.SetNum("ff_damage_total", g_Lifetime[client].ffDamageTotal);
+    exportKV.SetNum("ff_damage_record", g_Lifetime[client].ffDamageRecord);
+    exportKV.SetNum("ff_received_total", g_Lifetime[client].ffReceivedTotal);
+    exportKV.SetNum("ff_received_record", g_Lifetime[client].ffReceivedRecord);
+    exportKV.SetNum("molotovs_thrown", g_Lifetime[client].molotovsThrown);
+    exportKV.SetNum("molotov_kills", g_Lifetime[client].molotovKills);
+    exportKV.SetNum("pipes_thrown", g_Lifetime[client].pipesThrown);
+    exportKV.SetNum("pipe_kills", g_Lifetime[client].pipeKills);
+    exportKV.SetNum("biles_thrown", g_Lifetime[client].bilesThrown);
+    exportKV.SetNum("bile_hits", g_Lifetime[client].bileHits);
+    exportKV.SetNum("kills_common", g_Lifetime[client].killsCommon);
+    exportKV.SetNum("kills_tank", g_Lifetime[client].killsTank);
+    exportKV.SetNum("kills_witch", g_Lifetime[client].killsWitch);
+    exportKV.SetNum("kills_smoker", g_Lifetime[client].killsSmoker);
+    exportKV.SetNum("kills_hunter", g_Lifetime[client].killsHunter);
+    exportKV.SetNum("kills_boomer", g_Lifetime[client].killsBoomer);
+    exportKV.SetNum("kills_charger", g_Lifetime[client].killsCharger);
+    exportKV.SetNum("kills_jockey", g_Lifetime[client].killsJockey);
+    exportKV.SetNum("kills_spitter", g_Lifetime[client].killsSpitter);
+    exportKV.SetNum("tank_damage", g_Lifetime[client].tankDamage);
+    exportKV.SetNum("witch_damage", g_Lifetime[client].witchDamage);
+    exportKV.SetNum("hunter_skeets", g_Lifetime[client].hunterSkeets);
+    exportKV.SetNum("witch_crowns", g_Lifetime[client].witchCrowns);
+    exportKV.SetNum("tongue_cuts", g_Lifetime[client].tongueCuts);
+    exportKV.SetNum("self_rescues", g_Lifetime[client].selfRescues);    
+    exportKV.SetNum("charger_levels", g_Lifetime[client].chargerLevels);
+    exportKV.SetNum("rock_skeets", g_Lifetime[client].rockSkeets);
+    exportKV.SetNum("spitter_killed_pre_spat", g_Lifetime[client].spitterKilledPreSpat);
+    exportKV.SetNum("jockey_deadstops", g_Lifetime[client].jockeyDeadstops);
+    exportKV.SetNum("hunter_deadstops", g_Lifetime[client].hunterDeadstops);
+    exportKV.SetNum("witches_startled", g_Lifetime[client].witchesStartled);
+    exportKV.SetNum("times_boomed", g_Lifetime[client].timesBoomed);
+
+    if (exportKV.JumpToKey("Weapons", true)) {
+        for (int i = 0; i < g_iCleanWeaponCount; i++) {
+            char wName[64];
+            strcopy(wName, sizeof(wName), g_sCleanWeaponNames[i]);
+
+            WeaponStats wS;
+            wS = g_WeaponLifetimeCache[client][i];
+            if (wS.fired == 0 && wS.kills == 0) continue;
+
+            if (exportKV.JumpToKey(wName, true)) {
+                exportKV.SetNum("fired", wS.fired);
+                exportKV.SetNum("hits", wS.hits);
+                exportKV.SetNum("kills", wS.kills);
+                exportKV.SetNum("headshots", wS.headshots);
+                exportKV.SetNum("kills_common", wS.killsCommon);
+                exportKV.SetNum("kills_smoker", wS.killsSmoker);
+                exportKV.SetNum("kills_boomer", wS.killsBoomer);
+                exportKV.SetNum("kills_hunter", wS.killsHunter);
+                exportKV.SetNum("kills_spitter", wS.killsSpitter);
+                exportKV.SetNum("kills_jockey", wS.killsJockey);
+                exportKV.SetNum("kills_charger", wS.killsCharger);
+                exportKV.SetNum("kills_tank", wS.killsTank);
+                exportKV.SetNum("kills_witch", wS.killsWitch);
+                exportKV.SetNum("tank_damage", wS.tankDamage);
+                exportKV.SetNum("witch_damage", wS.witchDamage);
+                exportKV.SetNum("hunter_skeets", wS.hunterSkeets);
+                exportKV.SetNum("witch_crowns", wS.witchCrowns);
+                exportKV.SetNum("tongue_cuts", wS.tongueCuts);
+                exportKV.SetNum("charger_levels", wS.chargerLevels);
+                exportKV.SetNum("rock_skeets", wS.rockSkeets);
+                exportKV.SetNum("spitter_killed_pre_spat", wS.spitterKilledPreSpat);
+                exportKV.GoBack();
+            }
+        }
+        exportKV.GoBack();
+    }
+
+    if (exportKV.JumpToKey("DamageReceived", true)) {
+        for (int i = 0; i < MAX_DMG_SOURCES; i++) {
+            int dmgVal = g_iDamageLifetimeCache[client][i];
+            if (dmgVal == 0) continue;
+            
+            if (exportKV.JumpToKey(g_sDamageSourceKeys[i], true)) {
+                exportKV.SetNum("damage", dmgVal);
+                exportKV.GoBack();
+            }
+        }
+        exportKV.GoBack();
+    }
+
+    exportKV.Rewind(); 
+    bool bSuccess = exportKV.ExportToFile(sPath); 
+    delete exportKV;
+
+    return bSuccess;
 }
 
 // ====================================================================================================
