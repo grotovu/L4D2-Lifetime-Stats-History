@@ -1295,16 +1295,31 @@ void Event_WeaponFire(Event event, const char[] name, bool dontBroadcast) {
     if (weaponID != -1) {
         UpdateWeaponStatID(client, weaponID, 0);
         
-        char clean[64];
-        strcopy(clean, sizeof(clean), g_sCleanWeaponNames[weaponID]);
-        
-        if (clean[0] == 'm' && strcmp(clean, "molotov") == 0) {
-            ADD_STAT(client, molotovsThrown);
-        } else if (clean[0] == 'p' && strcmp(clean, "pipe_bomb") == 0) {
-            ADD_STAT(client, pipesThrown);
-        } else if (clean[0] == 'v' && strcmp(clean, "vomitjar") == 0) {
-            ADD_STAT(client, bilesThrown);
-        }
+        char rawWeapon[64];
+		event.GetString("weapon", rawWeapon, sizeof(rawWeapon));
+		
+		char rawClean[64];
+		if (strncmp(rawWeapon, "weapon_", 7) == 0)
+		{
+			strcopy(rawClean, sizeof(rawClean), rawWeapon[7]);
+		}
+		else
+		{
+			strcopy(rawClean, sizeof(rawClean), rawWeapon);
+		}
+		
+		if (StrEqual(rawClean, "molotov"))
+		{
+			ADD_STAT(client, molotovsThrown);
+		}
+		else if (StrEqual(rawClean, "pipe_bomb"))
+		{
+			ADD_STAT(client, pipesThrown);
+		}
+		else if (StrEqual(rawClean, "vomitjar"))
+		{
+			ADD_STAT(client, bilesThrown);
+		}
     }
 }
 
