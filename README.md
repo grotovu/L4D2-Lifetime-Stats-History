@@ -1,6 +1,8 @@
 # [L4D2] Lifetime Stats History
-A SourceMod plugin for Left 4 Dead 2. It tracks detailed stats for both human players and bots. Player stats are saved to a local database so they carry over between play sessions.
-The plugin can also write stats into text files in your server folder when a round ends, when you change maps, or when you win a campaign.
+A SourceMod plugin for Left 4 Dead 2. It tracks detailed stats for both human players and bots. Player stats are saved to a local database so they carry over between play sessions. The plugin can also write stats into text files in your server folder when a round ends, when you change maps, or when you win a campaign.
+
+Also logs activity with timestamps that persists throughout a campaign and resets in a new campaign. Use the command to print to console. Automatically creates a log file per chapter or after finale rescue.
+
 
 Why I made this:
 Steam's stats tracker is buggy. To satisfy my addiction to accurate lifetime and campaign data, I built this.
@@ -9,7 +11,9 @@ Steam's stats tracker is buggy. To satisfy my addiction to accurate lifetime and
 - Keeps lifetime stats for human players in a local SQLite database.
 - Prevents stats from resetting when a new map loads during a campaign.
 - Keeps track of bot stats for the campaign (like kills, weapons used, throwables, and feats).
-- Saves readable text logs in the logs/stats_history/ folder.
+- Saves text logs in the logs/stats_history/ folder.
+- Logs activity throughout the campaign (ex. who saved whom).
+- Saves activity logs in the logs/match_activity/ folder
 
 # What It Tracks
 **Game & Team Stats**
@@ -44,6 +48,8 @@ Steam's stats tracker is buggy. To satisfy my addiction to accurate lifetime and
 - !printstatsforcampaign - Saves your campaign stats to a text file.
 - !savestatsforme - Manually saves your current stats to the database.
 - !resetstatsforme - Deletes your own stats from the database (cannot be undone).
+- !showmatchactivity - Print current campaign activity log to the console.
+- !printmatchactivity - Manually write current campaign activity log to file in logs/match_activity/ folder
 
 # Commands For Admins (Root flags required)
 - sm_savestatshistory - Force-saves stats for all players currently in the server.
@@ -53,70 +59,35 @@ Steam's stats tracker is buggy. To satisfy my addiction to accurate lifetime and
 - sourcemod
 - left4dhooks
 
+**Optional:**
+- L4D2 Custom Survivor Bot Names: https://github.com/grotovu/L4D2-Custom-Survivor-Bot-Names
+
 # Configuration
 An example of the config file at cfg/sourcemod/l4d2_stats_history.cfg
 ```
+// ConVars for plugin "l4d2_stats_history.smx"
+
 // Enable the Stats History tracking plugin?
 // -
 // Default: "1"
-l4d2_stats_enable "1"
-
-// Custom name for Bill
-// -
-// Default: ""
-l4d2_stats_name_bill "Reisen"
-
-// Custom name for Coach
-// -
-// Default: ""
-l4d2_stats_name_coach "Ringo"
-
-// Custom name for Ellis
-// -
-// Default: ""
-l4d2_stats_name_ellis "Seiran"
-
-// Custom name for Francis
-// -
-// Default: ""
-l4d2_stats_name_francis "Ringo"
-
-// Custom name for Louis
-// -
-// Default: ""
-l4d2_stats_name_louis "Rei'sen II"
-
-// Custom name for Nick
-// -
-// Default: ""
-l4d2_stats_name_nick "Reisen"
-
-// Custom name for Rochelle
-// -
-// Default: ""
-l4d2_stats_name_rochelle "Rei'sen II"
-
-// Custom name for Zoey
-// -
-// Default: ""
-l4d2_stats_name_zoey "Seiran"
+l4d2_stats_history_enable "1"
 
 // Should damage received statistics be printed in show commands and log sheets? (0=No, 1=Yes)
 // -
 // Default: "1"
-l4d2_stats_print_damage_received "1"
+l4d2_stats_history_print_damage_received "1"
 
 // 0=Disabled, 1=Print at Finale Win, 2=Print at end of every chapter.
 // -
 // Default: "2"
-l4d2_stats_print_mode "2"
+l4d2_stats_history_print_mode "2"
 
 // Should stats be saved to the database when a player disconnects? (Set to 0 during testing/modding)
 // -
 // Default: "1"
 // Minimum: "0.000000"
 // Maximum: "1.000000"
-l4d2_stats_save_disconnect "1"
+l4d2_stats_history_save_disconnect "1"
 ```
 
 Disclaimer: AI tools were used to help write, optimize, and debug parts of this plugin's code and documentation.
