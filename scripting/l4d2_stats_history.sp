@@ -206,25 +206,6 @@ enum struct LifetimeStats
 	}
 }
 
-enum struct SessionStats
-{
-	int revives;
-	int revivedByTeammateSession;
-	int protections;
-	int protectedByTeammateSession;
-	int ffDamage;
-	int ffReceived;
-
-	void Reset() {
-		this.revives = 0;
-		this.revivedByTeammateSession = 0;
-		this.protections = 0;
-		this.protectedByTeammateSession = 0;
-		this.ffDamage = 0;
-		this.ffReceived = 0;
-	}
-}
-
 enum struct WeaponStats
 {
 	int fired;
@@ -260,7 +241,6 @@ char g_sAuthID[MAXPLAYERS + 1][64];
 
 LifetimeStats g_Lifetime[MAXPLAYERS + 1];
 LifetimeStats g_Campaign[MAXPLAYERS + 1];
-SessionStats  g_Session[MAXPLAYERS + 1];
 
 bool g_bStatsLoaded[MAXPLAYERS + 1];
 
@@ -764,7 +744,6 @@ public void OnClientPostAdminCheck(int client)
     if (!IsFakeClient(client))
     {
         g_Lifetime[client].Init();
-        g_Session[client].Reset();
         g_bStatsLoaded[client] = false;
         g_bHasWonCampaign[client] = false;
         
@@ -1205,9 +1184,6 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 	g_bIsTransitionOrRestart = false;
 	
 	for (int i = 1; i <= MaxClients; i++) {
-        if (g_bStatsLoaded[i]) {
-            g_Session[i].Reset();
-        }
         g_bTankAlive[i] = false;
         g_iTankLastHealth[i] = 0;
 		g_iPinnedBy[i] = 0;
@@ -1344,21 +1320,15 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
             ADD_STAT_VAL(attacker, ffDamageTotal, dmg);
             
             if (!IsFakeClient(attacker)) {
-                g_Session[attacker].ffDamage += dmg;
-                if (g_Session[attacker].ffDamage > g_Lifetime[attacker].ffDamageRecord)
-                    g_Lifetime[attacker].ffDamageRecord = g_Session[attacker].ffDamage;
-                if (g_Session[attacker].ffDamage > g_Campaign[attacker].ffDamageRecord)
-                    g_Campaign[attacker].ffDamageRecord = g_Session[attacker].ffDamage;
+                if (g_Campaign[attacker].ffDamageTotal > g_Lifetime[attacker].ffDamageRecord)
+                    g_Lifetime[attacker].ffDamageRecord = g_Campaign[attacker].ffDamageTotal;
             }
             
             ADD_STAT_VAL(victim, ffReceivedTotal, dmg);
             
             if (!IsFakeClient(victim)) {
-                g_Session[victim].ffReceived += dmg;
-                if (g_Session[victim].ffReceived > g_Lifetime[victim].ffReceivedRecord)
-                    g_Lifetime[victim].ffReceivedRecord = g_Session[victim].ffReceived;
-                if (g_Session[victim].ffReceived > g_Campaign[victim].ffReceivedRecord)
-                    g_Campaign[victim].ffReceivedRecord = g_Session[victim].ffReceived;
+                if (g_Campaign[victim].ffReceivedTotal > g_Lifetime[victim].ffReceivedRecord)
+                    g_Lifetime[victim].ffReceivedRecord = g_Campaign[victim].ffReceivedTotal;
             }
             return;
         }
@@ -1478,11 +1448,8 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                     
                     if (!IsFakeClient(pinnedSurvivor))
                     {
-                        g_Session[pinnedSurvivor].protectedByTeammateSession++;
-                        if (g_Session[pinnedSurvivor].protectedByTeammateSession > g_Lifetime[pinnedSurvivor].protectedByTeammateRecord)
-                            g_Lifetime[pinnedSurvivor].protectedByTeammateRecord = g_Session[pinnedSurvivor].protectedByTeammateSession;
-                        if (g_Session[pinnedSurvivor].protectedByTeammateSession > g_Campaign[pinnedSurvivor].protectedByTeammateRecord)
-                            g_Campaign[pinnedSurvivor].protectedByTeammateRecord = g_Session[pinnedSurvivor].protectedByTeammateSession;
+                        if (g_Campaign[pinnedSurvivor].protectedByTeammate > g_Lifetime[pinnedSurvivor].protectedByTeammateRecord)
+                            g_Lifetime[pinnedSurvivor].protectedByTeammateRecord = g_Campaign[pinnedSurvivor].protectedByTeammate;
                     }
                 }
                 else
@@ -2096,11 +2063,8 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
         }
 		
         if (!IsFakeClient(client)) {
-            g_Session[client].revives++;
-            if (g_Session[client].revives > g_Lifetime[client].revivesRecord) 
-                g_Lifetime[client].revivesRecord = g_Session[client].revives;
-            if (g_Session[client].revives > g_Campaign[client].revivesRecord) 
-                g_Campaign[client].revivesRecord = g_Session[client].revives;
+            if (g_Campaign[client].revivesTotal > g_Lifetime[client].revivesRecord) 
+                g_Lifetime[client].revivesRecord = g_Campaign[client].revivesTotal;
         }
     }
     
@@ -2109,12 +2073,8 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
             ADD_STAT(subject, revivedByTeammate);
 			
             if (!IsFakeClient(subject)) {
-                g_Session[subject].revivedByTeammateSession++;
-                if (g_Session[subject].revivedByTeammateSession > g_Lifetime[subject].revivedByTeammateRecord) {
-                    g_Lifetime[subject].revivedByTeammateRecord = g_Session[subject].revivedByTeammateSession;
-                }
-                if (g_Session[subject].revivedByTeammateSession > g_Campaign[subject].revivedByTeammateRecord) {
-                    g_Campaign[subject].revivedByTeammateRecord = g_Session[subject].revivedByTeammateSession;
+                if (g_Campaign[subject].revivedByTeammate > g_Lifetime[subject].revivedByTeammateRecord) {
+                    g_Lifetime[subject].revivedByTeammateRecord = g_Campaign[subject].revivedByTeammate;
                 }
             }
         }
@@ -2130,12 +2090,9 @@ void Event_AwardEarned(Event event, const char[] name, bool dontBroadcast) {
             ADD_STAT(client, protectionsTotal);
 			
 			if (!IsFakeClient(client)) {
-				g_Session[client].protections++;
-				if (g_Session[client].protections > g_Lifetime[client].protectionsRecord)
-					g_Lifetime[client].protectionsRecord = g_Session[client].protections;
-				if (g_Session[client].protections > g_Campaign[client].protectionsRecord)
-					g_Campaign[client].protectionsRecord = g_Session[client].protections;
-			}
+                if (g_Campaign[client].protectionsTotal > g_Lifetime[client].protectionsRecord)
+                    g_Lifetime[client].protectionsRecord = g_Campaign[client].protectionsTotal;
+            }
         }
     }
 }
@@ -2170,11 +2127,8 @@ void Event_SaveFromPin(Event event, const char[] name, bool dontBroadcast)
 
             if (!IsFakeClient(victim))
             {
-                g_Session[victim].protectedByTeammateSession++;
-                if (g_Session[victim].protectedByTeammateSession > g_Lifetime[victim].protectedByTeammateRecord)
-                    g_Lifetime[victim].protectedByTeammateRecord = g_Session[victim].protectedByTeammateSession;
-                if (g_Session[victim].protectedByTeammateSession > g_Campaign[victim].protectedByTeammateRecord)
-                    g_Campaign[victim].protectedByTeammateRecord = g_Session[victim].protectedByTeammateSession;
+                if (g_Campaign[victim].protectedByTeammate > g_Lifetime[victim].protectedByTeammateRecord)
+                    g_Lifetime[victim].protectedByTeammateRecord = g_Campaign[victim].protectedByTeammate;
             }
         }
     }
@@ -2218,11 +2172,8 @@ public Action Msg_PZDmgMsg(UserMsg msg_id, BfRead msg, const int[] players, int 
 
                 if (!IsFakeClient(victim))
                 {
-                    g_Session[victim].protectedByTeammateSession++;
-                    if (g_Session[victim].protectedByTeammateSession > g_Lifetime[victim].protectedByTeammateRecord)
-                        g_Lifetime[victim].protectedByTeammateRecord = g_Session[victim].protectedByTeammateSession;
-                    if (g_Session[victim].protectedByTeammateSession > g_Campaign[victim].protectedByTeammateRecord)
-                        g_Campaign[victim].protectedByTeammateRecord = g_Session[victim].protectedByTeammateSession; 
+                    if (g_Campaign[victim].protectedByTeammate > g_Lifetime[victim].protectedByTeammateRecord)
+                        g_Lifetime[victim].protectedByTeammateRecord = g_Campaign[victim].protectedByTeammate;
                 }
             }
         }
@@ -2636,7 +2587,7 @@ public Action CmdShowHistory(int client, int args)
     PrintToConsole(client, " \n=========================================================\n             LIFETIME STATISTICS HISTORY                 \n=========================================================");
     PrintToConsole(client, " [ LIFETIME GAMEPLAY STATS ]");
     PrintToConsole(client, " Playtime:           %d hours, %d minutes", h, m);
-    PrintToConsole(client, " Campaigns:          %d Played / %d Won (%.1f%% Win Rate)", g_Lifetime[client].campaignsPlayed, g_Lifetime[client].campaignsWon, winRate);
+    PrintToConsole(client, " Campaigns:          %d Played / %d Won (%.1f%% Win Rate) / %d Restarts", g_Lifetime[client].campaignsPlayed, g_Lifetime[client].campaignsWon, winRate, g_Lifetime[client].totalRestarts);
 	PrintToConsole(client, " Incapacitations:    %d (Avg: %.1f)  / Deaths (Permanent): %d (Avg: %.1f)", g_Lifetime[client].incaps, float(g_Lifetime[client].incaps) / cp_f, g_Lifetime[client].deaths, float(g_Lifetime[client].deaths) / cp_f);
 	
     if (totalS < 3600) {
@@ -2795,7 +2746,7 @@ public Action CmdShowCampaignHistory(int client, int args)
     PrintToConsole(client, " \n=========================================================\n             CURRENT CAMPAIGN STATS HISTORY              \n=========================================================");
     PrintToConsole(client, " [ CAMPAIGN GAMEPLAY STATS ]");
     PrintToConsole(client, " Playtime:           %d hours, %d minutes", h, m);
-    PrintToConsole(client, " Campaigns:          %d Played / %d Won (%.1f%% Win Rate)", g_Campaign[client].campaignsPlayed, g_Campaign[client].campaignsWon, winRate);
+    PrintToConsole(client, " Campaigns:          %d Played / %d Won (%.1f%% Win Rate) / %d Restarts", g_Campaign[client].campaignsPlayed, g_Campaign[client].campaignsWon, winRate, g_Campaign[client].totalRestarts);
 	PrintToConsole(client, " Incapacitations:    %d (Avg: %.1f)  / Deaths (Permanent): %d (Avg: %.1f)", g_Campaign[client].incaps, float(g_Campaign[client].incaps) / cp_f, g_Campaign[client].deaths, float(g_Campaign[client].deaths) / cp_f);
 	
     if (totalS < 3600) {
@@ -3197,7 +3148,7 @@ void GeneratePrintFile(int client, bool isAuto)
     Format(lineBuffer, sizeof(lineBuffer), "Playtime:           %d hours, %d minutes", h, m);
     hFile.WriteLine(lineBuffer);
     
-    Format(lineBuffer, sizeof(lineBuffer), "Campaigns:          %d Played / %d Won (%.1f%% Win Rate)", g_Lifetime[client].campaignsPlayed, g_Lifetime[client].campaignsWon, winRate);
+    Format(lineBuffer, sizeof(lineBuffer), "Campaigns:          %d Played / %d Won (%.1f%% Win Rate) / %d Restarts", g_Lifetime[client].campaignsPlayed, g_Lifetime[client].campaignsWon, winRate, g_Lifetime[client].totalRestarts);
     hFile.WriteLine(lineBuffer);
 	
 	Format(lineBuffer, sizeof(lineBuffer), "Incapacitations:    %d (Avg: %.1f)  / Deaths (Permanent): %d (Avg: %.1f)", g_Lifetime[client].incaps, float(g_Lifetime[client].incaps) / cp_f, g_Lifetime[client].deaths, float(g_Lifetime[client].deaths) / cp_f);
@@ -3471,7 +3422,7 @@ void GenerateCampaignPrintFile(int client)
     Format(lineBuffer, sizeof(lineBuffer), "Playtime:           %d hours, %d minutes", h, m);
     hFile.WriteLine(lineBuffer);
 	
-    Format(lineBuffer, sizeof(lineBuffer), "Campaigns:          %d Played / %d Won (%.1f%% Win Rate)", g_Campaign[client].campaignsPlayed, g_Campaign[client].campaignsWon, winRate);
+    Format(lineBuffer, sizeof(lineBuffer), "Campaigns:          %d Played / %d Won (%.1f%% Win Rate) / %d Restarts", g_Campaign[client].campaignsPlayed, g_Campaign[client].campaignsWon, winRate, g_Campaign[client].totalRestarts);
     hFile.WriteLine(lineBuffer);
 	
 	Format(lineBuffer, sizeof(lineBuffer), "Incapacitations:    %d (Avg: %.1f)  / Deaths (Permanent): %d (Avg: %.1f)", g_Campaign[client].incaps, float(g_Campaign[client].incaps) / cp_f, g_Campaign[client].deaths, float(g_Campaign[client].deaths) / cp_f);
@@ -3692,7 +3643,7 @@ void GenerateCampaignPrintFile(int client)
             Format(lineBuffer, sizeof(lineBuffer), " [ %s (BOT) ]", botName);
             hFile.WriteLine(lineBuffer);
 			
-            Format(lineBuffer, sizeof(lineBuffer), "  Playtime:        %d hours, %d minutes | Kills: %d | Incaps: %d / Deaths: %d", hS, mS, botTotalKills, g_BotCampaign[i].incaps, g_BotCampaign[i].deaths);
+            Format(lineBuffer, sizeof(lineBuffer), "  Playtime:        %d hours, %d minutes | Kills: %d | Incaps: %d / Deaths: %d / Restarts: %d", hS, mS, botTotalKills, g_BotCampaign[i].incaps, g_BotCampaign[i].deaths, g_BotCampaign[i].totalRestarts);
             hFile.WriteLine(lineBuffer);
 			
             Format(lineBuffer, sizeof(lineBuffer), "  Infected Slain:  CI: %-5d /  Total SI: %-5d (Tanks: %-3d / Witches: %-3d)", g_BotCampaign[i].killsCommon, botSI, g_BotCampaign[i].killsTank, g_BotCampaign[i].killsWitch);
@@ -3795,7 +3746,6 @@ public Action CmdResetHistory(int client, int args)
     for (int i = 1; i <= MaxClients; i++) {
         g_Lifetime[i].Reset();
         g_Campaign[i].Reset();
-        g_Session[i].Reset();
 
         for (int w = 0; w < 128; w++) {
             g_WeaponLifetimeCache[i][w] = zeroWeapon;
@@ -3876,7 +3826,6 @@ public Action CmdResetStatsForMe(int client, int args)
 
     g_Lifetime[client].Reset();
     g_Campaign[client].Reset();
-    g_Session[client].Reset();
 
     WeaponStats zeroWeapon;
     for (int w = 0; w < 128; w++) {
@@ -3925,7 +3874,7 @@ public Action CmdShowBotsCampaignHistory(int client, int args)
             int botSI = g_BotCampaign[i].killsSmoker + g_BotCampaign[i].killsHunter + g_BotCampaign[i].killsBoomer + g_BotCampaign[i].killsCharger + g_BotCampaign[i].killsJockey + g_BotCampaign[i].killsSpitter + g_BotCampaign[i].killsTank + g_BotCampaign[i].killsWitch;
 			
             PrintToConsole(client, " \n [ %s (BOT) ]", botName);
-            PrintToConsole(client, "  Playtime:        %d hours, %d minutes | Kills: %d | Incaps: %d / Deaths: %d", h, m, totalKills, g_BotCampaign[i].incaps, g_BotCampaign[i].deaths);
+            PrintToConsole(client, "  Playtime:        %d hours, %d minutes | Kills: %d | Incaps: %d / Deaths: %d / Restarts: %d", h, m, totalKills, g_BotCampaign[i].incaps, g_BotCampaign[i].deaths, g_BotCampaign[i].totalRestarts);
             PrintToConsole(client, "  Infected Slain:  CI: %-5d /  Total SI: %-5d (Tanks: %-3d / Witches: %-3d)", g_BotCampaign[i].killsCommon, botSI, g_BotCampaign[i].killsTank, g_BotCampaign[i].killsWitch);
             PrintToConsole(client, "  SI Breakdown:    Sm:%-3d /  Hu:%-3d /  Bo:%-3d /  Ch:%-3d /  Jo:%-3d /  Sp:%-3d", g_BotCampaign[i].killsSmoker, g_BotCampaign[i].killsHunter, g_BotCampaign[i].killsBoomer, g_BotCampaign[i].killsCharger, g_BotCampaign[i].killsJockey, g_BotCampaign[i].killsSpitter);
             PrintToConsole(client, "  Teamplay Feats:  Revives:%-3d /  Heals:%-3d /  Defibs:%-3d /  Protections:%-3d /  Ledge Grabs:%-3d /  Ledge Rescues:%-3d", g_BotCampaign[i].revivesTotal, g_BotCampaign[i].medkitsUsed + g_BotCampaign[i].medkitsShared, g_BotCampaign[i].defibsUsed, g_BotCampaign[i].protectionsTotal, g_BotCampaign[i].ledgeGrabs, g_BotCampaign[i].ledgeRescues);
