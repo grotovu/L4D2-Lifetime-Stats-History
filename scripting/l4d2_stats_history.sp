@@ -2380,6 +2380,13 @@ void UpdateClientCache(int client) {
     if (client <= 0 || !IsClientInGame(client)) return;
     g_bIsBot[client] = IsFakeClient(client);
     g_iClientChar[client] = GetSurvivorCharacterInternal(client);
+
+    int weapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+    if (weapon > 0 && IsValidEntity(weapon)) {
+        OnWeaponSwitchPost(client, weapon);
+    } else {
+        g_iClientActiveWeaponID[client] = -1;
+    }
 }
 
 int GetPinnedVictim(int infected)
