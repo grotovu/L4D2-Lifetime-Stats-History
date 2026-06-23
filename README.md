@@ -82,6 +82,13 @@ l4d2_stats_history_print_damage_received "1"
 // Default: "2"
 l4d2_stats_history_print_mode "2"
 
+// Should a safety backup be created automatically before running reset commands? (0=No, 1=Yes)
+// -
+// Default: "1"
+// Minimum: "0.000000"
+// Maximum: "1.000000"
+l4d2_stats_history_reset_backup "1"
+
 // Should stats be saved to the database when a player disconnects? (Set to 0 during testing/modding)
 // -
 // Default: "1"
