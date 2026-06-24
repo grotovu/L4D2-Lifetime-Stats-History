@@ -264,11 +264,13 @@ float g_fLastSkeetTime[MAXPLAYERS + 1];
 
 bool g_bTankAlive[MAXPLAYERS + 1];
 int  g_iTankLastHealth[MAXPLAYERS + 1];
+int g_iDamageToTank[MAXPLAYERS + 1][MAXPLAYERS + 1];
 bool g_bRockSkeeted[MAX_ENTITIES_TRACKED];
 
 int  g_iWitchDamageAwarded[MAX_ENTITIES_TRACKED];
 int g_iWitchFirstHitTick[MAX_ENTITIES_TRACKED];
 bool g_bIsWitchEntity[MAX_ENTITIES_TRACKED];
+int g_iDamageToWitch[MAX_ENTITIES_TRACKED][MAXPLAYERS + 1];
 
 bool g_bIsCommonEntity[MAX_ENTITIES_TRACKED];
 
@@ -1403,6 +1405,8 @@ void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
         g_bPrintedThisRound = true;
         
         g_bIsTransitionOrRestart = true;
+		
+		LogActivity(">>> Survival Map Restarted <<<");
 
         for (int i = 1; i <= MaxClients; i++) {
             if (g_bStatsLoaded[i] && IsValidSurvivor(i)) {
@@ -1527,6 +1531,8 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
                     {
                         ADD_STAT_VAL(attacker, tankDamage, actualDmg);
                         
+						g_iDamageToTank[victim][attacker] += actualDmg;
+						
                         int weaponID = g_iClientActiveWeaponID[attacker];
                         if (weaponID != -1) {
                             UpdateWeaponStatID(attacker, weaponID, 13, actualDmg);
@@ -1795,6 +1801,8 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
             char sName[32];
             GetPlayerNameSafe(attacker, sName, sizeof(sName));
             LogActivity("%s dealt the finishing blow to the Tank.", sName);
+			
+			LogTankDamageBreakdown(victim);
         }
     }
 	
@@ -1860,6 +1868,7 @@ void Event_InfectedHurt(Event event, const char[] name, bool dontBroadcast)
                 toAward = maxHealth - alreadyAwarded;
 
             ADD_STAT_VAL(attacker, witchDamage, toAward);
+			g_iDamageToWitch[victim][attacker] += toAward;
             g_iWitchDamageAwarded[victim] += toAward;
             
             UpdateWeaponStat(attacker, clean, 14, toAward);
@@ -1910,12 +1919,14 @@ void Event_WitchKilled(Event event, const char[] name, bool dontBroadcast) {
                 char sName[32];
                 GetPlayerNameSafe(attacker, sName, sizeof(sName));
                 LogActivity("%s crowned the Witch.", sName);
+				LogWitchDamageBreakdown(witch);
                 return;
             }
         }
         char sName[32];
         GetPlayerNameSafe(attacker, sName, sizeof(sName));
         LogActivity("%s killed the Witch.", sName);
+		LogWitchDamageBreakdown(witch);
     }
 }
 
@@ -1953,6 +1964,10 @@ public void OnEntityCreated(int entity, const char[] classname)
 			g_bWitchBurnt[entity] = false;
             SDKHook(entity, SDKHook_TraceAttack, OnWitchTraceAttack);
             SDKHook(entity, SDKHook_OnTakeDamage, OnWitchTakeDamage);
+			
+			for (int i = 1; i <= MaxClients; i++) {
+                g_iDamageToWitch[entity][i] = 0;
+            }
         }
     }   
     
@@ -2008,6 +2023,10 @@ public void OnEntityDestroyed(int entity)
         g_bIsWitchHeadshot[entity] = false;
         g_bIsWitchEntity[entity] = false;
 		g_bRockSkeeted[entity] = false;
+		
+		for (int i = 1; i <= MaxClients; i++) {
+            g_iDamageToWitch[entity][i] = 0;
+        }
     }
 }
 
@@ -2148,6 +2167,10 @@ void Event_TankSpawn(Event event, const char[] name, bool dontBroadcast) {
 		g_bTankAlive[client] = true;
 		g_bTankBurnt[client] = false;
 		g_iTankLastHealth[client] = GetEntProp(client, Prop_Data, "m_iMaxHealth");
+		
+		for (int i = 1; i <= MaxClients; i++) {
+			g_iDamageToTank[client][i] = 0;
+		}
 	}
 }
 
@@ -2178,6 +2201,11 @@ void Event_BotReplacedPlayer(Event event, const char[] name, bool dontBroadcast)
 		g_bTankAlive[b] = true;
 		g_bTankBurnt[b] = g_bTankBurnt[p];
 		g_iTankLastHealth[b] = g_iTankLastHealth[p];
+		
+		for (int i = 1; i <= MaxClients; i++) {
+			g_iDamageToTank[b][i] = g_iDamageToTank[p][i];
+			g_iDamageToTank[p][i] = 0;
+		}
 	}
 }
 
@@ -2194,6 +2222,11 @@ void Event_PlayerReplacedBot(Event event, const char[] name, bool dontBroadcast)
 		g_bTankAlive[p] = true;
 		g_bTankBurnt[p] = g_bTankBurnt[b];
 		g_iTankLastHealth[p] = g_iTankLastHealth[b];
+		
+		for (int i = 1; i <= MaxClients; i++) {
+			g_iDamageToTank[p][i] = g_iDamageToTank[b][i];
+			g_iDamageToTank[b][i] = 0;
+		}
 	}
 }
 
@@ -2356,6 +2389,10 @@ void Event_PillsUsed(Event event, const char[] n, bool d) {
     int client = GetClientOfUserId(event.GetInt("userid"));
     if (client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR) { 
         ADD_STAT(client, pillsUsed);
+		
+        char sName[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        LogActivity("%s used Pain Pills.", sName);
     }
 }
 
@@ -2363,6 +2400,10 @@ void Event_AdrenalineUsed(Event event, const char[] n, bool d) {
     int client = GetClientOfUserId(event.GetInt("userid"));
     if (client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR) { 
         ADD_STAT(client, adrenalineUsed);
+		
+        char sName[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        LogActivity("%s used Adrenaline.", sName);
     }
 }
 
@@ -2912,6 +2953,64 @@ void UpdateDamageReceivedStat(int client, const char[] source, int damage) {
                 g_iDamageBotCampaignCache[charID][sourceID] += damage;
             }
         }
+    }
+}
+
+void LogTankDamageBreakdown(int tank) {
+	char logBuf[512];
+	logBuf[0] = '\0';
+	
+	for (int i = 1; i <= MaxClients; i++) {
+		if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR) {
+			int dmg = g_iDamageToTank[tank][i];
+			if (dmg > 0) {
+				char sName[32];
+				GetPlayerNameSafe(i, sName, sizeof(sName));
+				if (logBuf[0] == '\0') {
+					Format(logBuf, sizeof(logBuf), "%s: %d HP", sName, dmg);
+				} else {
+					Format(logBuf, sizeof(logBuf), "%s | %s: %d HP", logBuf, sName, dmg);
+				}
+			}
+		}
+	}
+	
+	if (logBuf[0] != '\0') {
+		LogActivity("Tank Damage Breakdown -> %s", logBuf);
+	}
+	
+	for (int i = 1; i <= MaxClients; i++) {
+		g_iDamageToTank[tank][i] = 0;
+	}
+}
+
+void LogWitchDamageBreakdown(int witch) {
+    if (witch <= 0 || witch >= MAX_ENTITIES_TRACKED) return;
+
+    char logBuf[512];
+    logBuf[0] = '\0';
+    
+    for (int i = 1; i <= MaxClients; i++) {
+        if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR) {
+            int dmg = g_iDamageToWitch[witch][i];
+            if (dmg > 0) {
+                char sName[32];
+                GetPlayerNameSafe(i, sName, sizeof(sName));
+                if (logBuf[0] == '\0') {
+                    Format(logBuf, sizeof(logBuf), "%s: %d HP", sName, dmg);
+                } else {
+                    Format(logBuf, sizeof(logBuf), "%s | %s: %d HP", logBuf, sName, dmg);
+                }
+            }
+        }
+    }
+    
+    if (logBuf[0] != '\0') {
+        LogActivity("Witch Damage Breakdown -> %s", logBuf);
+    }
+
+    for (int i = 1; i <= MaxClients; i++) {
+        g_iDamageToWitch[witch][i] = 0;
     }
 }
 
