@@ -32,8 +32,13 @@
 #define DMG_SOURCE_SPITTER      8
 #define DMG_SOURCE_BOOMER       9
 #define DMG_SOURCE_FF           10
-#define DMG_SOURCE_WORLD        11
-#define MAX_DMG_SOURCES         12
+#define DMG_SOURCE_FALL         11
+#define DMG_SOURCE_ENV_FIRE     12
+#define DMG_SOURCE_HAZARD       13
+#define DMG_SOURCE_SELF         14
+#define DMG_SOURCE_INCAP_DECAY  15
+#define DMG_SOURCE_WORLD        16
+#define MAX_DMG_SOURCES         17 
 
 #define ADD_STAT(%1,%2) do{if(!g_bIsBot[%1]){if(g_bStatsLoaded[%1]){g_Lifetime[%1].%2++;g_Campaign[%1].%2++;}}else{if(g_iClientChar[%1]>=0&&g_iClientChar[%1]<MAX_BOT_CHARS){g_BotCampaign[g_iClientChar[%1]].%2++;}}}while(g_bMacroLoopFalse)
 
@@ -48,7 +53,7 @@
 char g_sDamageSourceKeys[MAX_DMG_SOURCES][32] = {
     "infected", "witch_claw", "tank_punch", "tank_rock", "hunter",
     "smoker", "jockey", "charger", "spitter", "boomer",
-    "friendly_fire", "world_damage"
+    "friendly_fire", "fall_damage", "env_fire", "map_hazard", "self_damage", "incap_decay", "world_damage"
 };
 
 WeaponStats g_WeaponLifetimeCache[MAXPLAYERS + 1][128];
@@ -2040,42 +2045,62 @@ public Action OnPlayerTakeDamage(int victim, int &attacker, int &inflictor, floa
     {
         char src[64];
         
-        if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
+		if (L4D_IsPlayerIncapacitated(victim) && (attacker <= 0 || attacker == victim) && !(damagetype & 32) && !(damagetype & 8))
         {
-            int attackerTeam = GetClientTeam(attacker);
-            if (attackerTeam == TEAM_INFECTED)
+            strcopy(src, sizeof(src), "incap_decay");
+        }
+        else if (damagetype & 32) 
+        {
+            strcopy(src, sizeof(src), "fall_damage");
+        }
+        else if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
+        {
+            if (attacker == victim)
             {
-                int zombieClass = GetEntProp(attacker, Prop_Send, "m_zombieClass");
-                switch (zombieClass) {
-                    case 1: strcopy(src, sizeof(src), "smoker");
-                    case 2: strcopy(src, sizeof(src), "boomer");
-                    case 3: strcopy(src, sizeof(src), "hunter");
-                    case 4: strcopy(src, sizeof(src), "spitter");
-                    case 5: strcopy(src, sizeof(src), "jockey");
-                    case 6: strcopy(src, sizeof(src), "charger");
-                    case 8: {
-					if (inflictor > 0 && inflictor != attacker && IsValidEntity(inflictor)) {
-							char infClass[64]; GetEntityClassname(inflictor, infClass, sizeof(infClass));
-							if (infClass[0] == 't' && strcmp(infClass, "tank_rock") == 0) {
-								strcopy(src, sizeof(src), "tank_rock");
+                strcopy(src, sizeof(src), "self_damage");
+            }
+            else
+            {
+                int attackerTeam = GetClientTeam(attacker);
+                if (attackerTeam == TEAM_INFECTED)
+                {
+                    int zombieClass = GetEntProp(attacker, Prop_Send, "m_zombieClass");
+                    switch (zombieClass) {
+                        case 1: strcopy(src, sizeof(src), "smoker");
+                        case 2: strcopy(src, sizeof(src), "boomer");
+                        case 3: strcopy(src, sizeof(src), "hunter");
+                        case 4: strcopy(src, sizeof(src), "spitter");
+                        case 5: strcopy(src, sizeof(src), "jockey");
+                        case 6: strcopy(src, sizeof(src), "charger");
+                        case 8: {
+							if (inflictor > 0 && inflictor != attacker && IsValidEntity(inflictor)) {
+								char infClass[64]; GetEntityClassname(inflictor, infClass, sizeof(infClass));
+								if (infClass[0] == 't' && strcmp(infClass, "tank_rock") == 0) {
+									strcopy(src, sizeof(src), "tank_rock");
+								} 
+								else if (strncmp(infClass, "prop_", 5) == 0) {
+									strcopy(src, sizeof(src), "world_damage");
+								} 
+								else {
+									strcopy(src, sizeof(src), "tank_punch");
+								}
 							} else {
 								strcopy(src, sizeof(src), "tank_punch");
 							}
-						} else {
-							strcopy(src, sizeof(src), "tank_punch");
-						}
-					}			
-                    default: strcopy(src, sizeof(src), "generic_hit");
+						}	
+                        default: strcopy(src, sizeof(src), "generic_hit");
+                    }
+                }
+                else if (attackerTeam == TEAM_SURVIVOR)
+                {
+                    strcopy(src, sizeof(src), "friendly_fire");
                 }
             }
-            else if (attackerTeam == TEAM_SURVIVOR)
-            {
-                strcopy(src, sizeof(src), "friendly_fire");
-            }
         }
-        else if (attacker > MaxClients && IsValidEntity(attacker))
+        else
         {
-            if (attacker < MAX_ENTITIES_TRACKED) {
+            if (attacker > 0 && attacker < MAX_ENTITIES_TRACKED && IsValidEntity(attacker))
+            {
                 if (g_bIsWitchEntity[attacker]) {
                     strcopy(src, sizeof(src), "witch_claw");
                 } else if (g_bIsCommonEntity[attacker]) {
@@ -2084,17 +2109,29 @@ public Action OnPlayerTakeDamage(int victim, int &attacker, int &inflictor, floa
                     char cls[64]; GetEntityClassname(attacker, cls, sizeof(cls));
                     if (cls[0] == 't' && strcmp(cls, "tank_rock") == 0) {
                         strcopy(src, sizeof(src), "tank_rock");
-                    } else {
+                    } 
+                    else if (damagetype & 8) { 
+                        strcopy(src, sizeof(src), "env_fire");
+                    } 
+                    else if (strcmp(cls, "trigger_hurt") == 0) {
+                        strcopy(src, sizeof(src), "map_hazard");
+                    } 
+                    else if (strcmp(cls, "env_fire") == 0 || strcmp(cls, "entityflame") == 0) {
+                        strcopy(src, sizeof(src), "env_fire");
+                    } 
+                    else {
                         strcopy(src, sizeof(src), "world_damage");
                     }
                 }
-            } else {
-                strcopy(src, sizeof(src), "world_damage");
             }
-        }
-        else
-        {
-            strcopy(src, sizeof(src), "world_damage");
+            else
+            {
+                if (damagetype & 8) { 
+                    strcopy(src, sizeof(src), "env_fire");
+                } else {
+                    strcopy(src, sizeof(src), "world_damage");
+                }
+            }
         }
 
         strcopy(g_sLastDamageSource[victim], sizeof(g_sLastDamageSource[]), src);
@@ -3025,6 +3062,13 @@ void GetPrettySourceName(const char[] source, char[] buffer, int maxlen) {
     else if (StrEqual(source, "charger")) strcopy(buffer, maxlen, "Charger");
     else if (StrEqual(source, "spitter")) strcopy(buffer, maxlen, "Spitter");
     else if (StrEqual(source, "boomer")) strcopy(buffer, maxlen, "Boomer");
+    else if (StrEqual(source, "friendly_fire")) strcopy(buffer, maxlen, "Friendly Fire");
+    else if (StrEqual(source, "fall_damage")) strcopy(buffer, maxlen, "Fall Damage");
+    else if (StrEqual(source, "env_fire")) strcopy(buffer, maxlen, "Environmental Fire");
+    else if (StrEqual(source, "map_hazard")) strcopy(buffer, maxlen, "Map Hazards (trigger_hurt)");
+    else if (StrEqual(source, "self_damage")) strcopy(buffer, maxlen, "Self Inflicted Damage");
+	else if (StrEqual(source, "incap_decay")) strcopy(buffer, maxlen, "Incapacitation Bleed-out");
+    else if (StrEqual(source, "world_damage")) strcopy(buffer, maxlen, "World / Physics Impact");
     else {
         strcopy(buffer, maxlen, source);
         if (buffer[0] != '\0') buffer[0] = CharToUpper(buffer[0]);
