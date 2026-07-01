@@ -315,6 +315,8 @@ ConVar g_cvPrintMode;
 ConVar g_cvSaveOnDisconnect;
 ConVar g_cvPrintDamageReceived;
 ConVar g_cvResetBackup;
+ConVar g_cvPrintWeaponStats;
+ConVar g_cvActivityLogsEnable;
 
 Database g_hDatabase = null;
 bool g_bIsDatabaseSaving = false;
@@ -376,7 +378,9 @@ public void OnPluginStart()
 	g_cvPrintMode = CreateConVar("l4d2_stats_history_print_mode", "2", "0=Disabled, 1=Print at Finale Win, 2=Print at end of every chapter.");
 	g_cvResetBackup = CreateConVar("l4d2_stats_history_reset_backup", "1", "Should a safety backup be created automatically before running reset commands? (0=No, 1=Yes)", _, true, 0.0, true, 1.0);
 	g_cvSaveOnDisconnect = CreateConVar("l4d2_stats_history_save_disconnect", "1", "Should stats be saved to the database when a player disconnects? (Set to 0 during testing/modding)", _, true, 0.0, true, 1.0);
-	g_cvPrintDamageReceived = CreateConVar("l4d2_stats_history_print_damage_received", "1", "Should damage received statistics be printed in show commands and log sheets? (0=No, 1=Yes)");
+	g_cvPrintWeaponStats = CreateConVar("l4d2_stats_history_print_weapon_stats", "1", "Should weapon statistics be printed in show commands and log sheets? (0=No, 1=Yes)");
+	g_cvPrintDamageReceived = CreateConVar("l4d2_stats_history_print_damage_received", "1", "Should damage received statistics be printed in show commands and log sheets? (0=No, 1=Yes)");	
+	g_cvActivityLogsEnable = CreateConVar("l4d2_stats_history_activity_logs_enable", "1", "Enable or disable writing activity logs to files? (0=No, 1=Yes)");
 	
 	g_cvBotNames[0] = FindConVar("l4d2_custom_bot_name_nick");
 	g_cvBotNames[1] = FindConVar("l4d2_custom_bot_name_rochelle");
@@ -967,6 +971,10 @@ public void SQL_Callback_LoadPlayerStats(Database db, DBResultSet results, const
 		g_Lifetime[client].witchesStartled           = results.FetchInt(col++);
         g_Lifetime[client].timesBoomed               = results.FetchInt(col++);
 		g_Lifetime[client].carAlarmsTriggered        = results.FetchInt(col++);
+		
+		if (g_Lifetime[client].campaignsPlayed < g_Lifetime[client].campaignsWon) {
+            g_Lifetime[client].campaignsPlayed = g_Lifetime[client].campaignsWon;
+        }
     }
 
     char auth[64];
@@ -1091,6 +1099,13 @@ void AddPlayerToTransaction(int client, Transaction hTr)
 
     char auth[64];
     if (!GetClientAuthId(client, AuthId_SteamID64, auth, sizeof(auth))) return;
+
+	if (g_Lifetime[client].campaignsPlayed < g_Lifetime[client].campaignsWon) {
+        g_Lifetime[client].campaignsPlayed = g_Lifetime[client].campaignsWon;
+    }
+    if (g_Campaign[client].campaignsPlayed < g_Campaign[client].campaignsWon) {
+        g_Campaign[client].campaignsPlayed = g_Campaign[client].campaignsWon;
+    }
 
     char sQuery[8192]; 
     char sSmallQuery[1024];
@@ -1339,6 +1354,14 @@ void Event_FinaleWin(Event event, const char[] name, bool dontBroadcast) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR) {
             
+            if (!IsFakeClient(i) && !StrEqual(g_sPlayerLastCampaignID[i], g_sCurrentCampaignID)) {
+                ADD_STAT(i, campaignsPlayed);
+                strcopy(g_sPlayerLastCampaignID[i], sizeof(g_sPlayerLastCampaignID[]), g_sCurrentCampaignID);
+                if (g_sAuthID[i][0] != '\0') {
+                    g_smPlayerLastCampaign.SetString(g_sAuthID[i], g_sCurrentCampaignID);
+                }
+            }
+
             ADD_STAT(i, campaignsWon);
             
             if (!IsFakeClient(i) && !g_bHasWonCampaign[i]) {
@@ -1820,7 +1843,15 @@ void Event_PlayerIncapacitated(Event event, const char[] name, bool dontBroadcas
         ADD_STAT(client, incaps);
         char sName[32];
         GetPlayerNameSafe(client, sName, sizeof(sName));
-        LogActivity("%s was incapacitated.", sName);
+        
+        char sCause[64], sPrettyCause[64];
+        strcopy(sCause, sizeof(sCause), g_sLastDamageSource[client]);
+        if (sCause[0] == '\0') {
+            strcopy(sCause, sizeof(sCause), "world_damage");
+        }
+        GetPrettySourceName(sCause, sPrettyCause, sizeof(sPrettyCause));
+
+        LogActivity("%s was incapacitated by %s.", sName, sPrettyCause);
     }
 }
 
@@ -2295,6 +2326,16 @@ public Action OnRockTakeDamage(int victim, int &attacker, int &inflictor, float 
     if (!IsSurvivor(attacker)) return Plugin_Continue;
     
     if (victim <= 0 || victim >= MAX_ENTITIES_TRACKED || g_bRockSkeeted[victim]) return Plugin_Continue;
+
+    if (damagetype & 8) return Plugin_Continue; 
+
+    if (inflictor > 0 && IsValidEntity(inflictor)) {
+        char infClass[64];
+        GetEntityClassname(inflictor, infClass, sizeof(infClass));
+        if (strcmp(infClass, "inferno") == 0 || strcmp(infClass, "entityflame") == 0) {
+            return Plugin_Continue;
+        }
+    }
 
     int health = GetEntProp(victim, Prop_Data, "m_iHealth");
     if (damage >= health)
@@ -3254,6 +3295,10 @@ public Action CmdShowHistory(int client, int args)
     }
 
     FlushKillsCache(client);
+	
+	if (g_Lifetime[client].campaignsPlayed < g_Lifetime[client].campaignsWon) {
+        g_Lifetime[client].campaignsPlayed = g_Lifetime[client].campaignsWon;
+    }
 
     int totalKills = 0, gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
     int favT1 = 0, favT2 = 0, favT3 = 0, favSec = 0;
@@ -3343,48 +3388,51 @@ public Action CmdShowHistory(int client, int args)
     PrintToConsole(client, " Tank Rock Skeets:   %-8d /  Spitters Pre-Spat:   %d", g_Lifetime[client].rockSkeets, g_Lifetime[client].spitterKilledPreSpat);
     PrintToConsole(client, " Times Boomed On:    %-8d /  Car Alarms Triggered:%d\n", g_Lifetime[client].timesBoomed, g_Lifetime[client].carAlarmsTriggered);
 
-    PrintToConsole(client, " [ WEAPON SUMMARY ]");
-    float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
-    float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
-    int totalGuns = bulletKills + shellKills;
-    float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
-    float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
-	
-    PrintToConsole(client, " Firearms:           %.1f%%", gunPct);
-    PrintToConsole(client, " Melee:              %.1f%%", meleePct);
-    PrintToConsole(client, " Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
-
-    char buf[64];
-    PrintToConsole(client, " [ FAVORITE WEAPONS ]");
-    if (favT1 > 0) { GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); PrintToConsole(client, " Tier 1:             %s (%d Kills)", buf, favT1); }
-    if (favT2 > 0) { GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); PrintToConsole(client, " Tier 2:             %s (%d Kills)", buf, favT2); }
-    if (favT3 > 0) { GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); PrintToConsole(client, " Tier 3 / Special:   %s (%d Kills)", buf, favT3); }
-    if (favSec > 0) { GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); PrintToConsole(client, " Secondary / Melee:  %s (%d Kills)\n", buf, favSec); }
-
-    PrintToConsole(client, " [ ALL WEAPONS ]\n %-20s %-8s %-8s %-8s %-8s\n ---------------------------------------------------------", "Weapon", "Kills", "Acc%", "HS%", "Fired");
-    for (int i = 0; i < g_iCleanWeaponCount; i++) {
-        WeaponStats wS;
-		wS = g_WeaponLifetimeCache[client][i];
-        char key[64];
-        strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
-		if (wS.fired == 0 && wS.kills == 0) continue;
-        GetPrettyWeaponName(key, buf, sizeof(buf));
-        float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
-        float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
-        PrintToConsole(client, " %-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
+	if (g_cvPrintWeaponStats.BoolValue)
+	{
+		PrintToConsole(client, " [ WEAPON SUMMARY ]");
+		float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
+		float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
+		int totalGuns = bulletKills + shellKills;
+		float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
+		float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
 		
-        if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
-            int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
-            PrintToConsole(client, "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
-                wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
-        }
-
-        if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
-            PrintToConsole(client, "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
-                wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
-        }
-    }
+		PrintToConsole(client, " Firearms:           %.1f%%", gunPct);
+		PrintToConsole(client, " Melee:              %.1f%%", meleePct);
+		PrintToConsole(client, " Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
+	
+		char buf[64];
+		PrintToConsole(client, " [ FAVORITE WEAPONS ]");
+		if (favT1 > 0) { GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); PrintToConsole(client, " Tier 1:             %s (%d Kills)", buf, favT1); }
+		if (favT2 > 0) { GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); PrintToConsole(client, " Tier 2:             %s (%d Kills)", buf, favT2); }
+		if (favT3 > 0) { GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); PrintToConsole(client, " Tier 3 / Special:   %s (%d Kills)", buf, favT3); }
+		if (favSec > 0) { GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); PrintToConsole(client, " Secondary / Melee:  %s (%d Kills)\n", buf, favSec); }
+	
+		PrintToConsole(client, " [ ALL WEAPONS ]\n %-20s %-8s %-8s %-8s %-8s\n ---------------------------------------------------------", "Weapon", "Kills", "Acc%", "HS%", "Fired");
+		for (int i = 0; i < g_iCleanWeaponCount; i++) {
+			WeaponStats wS;
+			wS = g_WeaponLifetimeCache[client][i];
+			char key[64];
+			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (wS.fired == 0 && wS.kills == 0) continue;
+			GetPrettyWeaponName(key, buf, sizeof(buf));
+			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
+			float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
+			PrintToConsole(client, " %-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
+			
+			if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
+				int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
+				PrintToConsole(client, "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
+					wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
+			}
+	
+			if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
+				PrintToConsole(client, "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
+					wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
+			}
+		}
+	}
 	
     if (g_cvPrintDamageReceived.BoolValue) {
         int totalDmg = GetTotalDamageReceived(g_iDamageLifetimeCache[client]);
@@ -3413,6 +3461,10 @@ public Action CmdShowCampaignHistory(int client, int args)
     }
 	
     FlushKillsCache(client);
+	
+	if (g_Campaign[client].campaignsPlayed < g_Campaign[client].campaignsWon) {
+        g_Campaign[client].campaignsPlayed = g_Campaign[client].campaignsWon;
+    }
 
     int totalKills = 0, gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
     int favT1 = 0, favT2 = 0, favT3 = 0, favSec = 0;
@@ -3502,48 +3554,51 @@ public Action CmdShowCampaignHistory(int client, int args)
     PrintToConsole(client, " Tank Rock Skeets:   %-8d /  Spitters Pre-Spat:   %d", g_Campaign[client].rockSkeets, g_Campaign[client].spitterKilledPreSpat);
     PrintToConsole(client, " Times Boomed On:    %-8d /  Car Alarms Triggered:%d\n", g_Campaign[client].timesBoomed, g_Campaign[client].carAlarmsTriggered);
 
-    PrintToConsole(client, " [ WEAPON SUMMARY ]");
-    float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
-    float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
-    int totalGuns = bulletKills + shellKills;
-    float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
-    float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
-	
-    PrintToConsole(client, " Firearms:           %.1f%%", gunPct);
-    PrintToConsole(client, " Melee:              %.1f%%", meleePct);
-    PrintToConsole(client, " Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
-
-    char buf[64];
-    PrintToConsole(client, " [ FAVORITE WEAPONS ]");
-    if (favT1 > 0) { GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); PrintToConsole(client, " Tier 1:             %s (%d Kills)", buf, favT1); }
-    if (favT2 > 0) { GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); PrintToConsole(client, " Tier 2:             %s (%d Kills)", buf, favT2); }
-    if (favT3 > 0) { GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); PrintToConsole(client, " Tier 3 / Special:   %s (%d Kills)", buf, favT3); }
-    if (favSec > 0) { GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); PrintToConsole(client, " Secondary / Melee:  %s (%d Kills)\n", buf, favSec); }
-
-    PrintToConsole(client, " [ ALL WEAPONS ]\n %-20s %-8s %-8s %-8s %-8s\n ---------------------------------------------------------", "Weapon", "Kills", "Acc%", "HS%", "Fired");
-    for (int i = 0; i < g_iCleanWeaponCount; i++) {
-        WeaponStats wS;
-		wS = g_WeaponCampaignCache[client][i];
-        char key[64];
-        strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
-		if (wS.fired == 0 && wS.kills == 0) continue;
-        GetPrettyWeaponName(key, buf, sizeof(buf));
-        float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
-        float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
-        PrintToConsole(client, " %-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
+	if (g_cvPrintWeaponStats.BoolValue)
+	{
+		PrintToConsole(client, " [ WEAPON SUMMARY ]");
+		float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
+		float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
+		int totalGuns = bulletKills + shellKills;
+		float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
+		float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
 		
-        if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
-            int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
-            PrintToConsole(client, "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
-                wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
-        }
-
-        if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
-            PrintToConsole(client, "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
-                wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
-        }
-    }
+		PrintToConsole(client, " Firearms:           %.1f%%", gunPct);
+		PrintToConsole(client, " Melee:              %.1f%%", meleePct);
+		PrintToConsole(client, " Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
+	
+		char buf[64];
+		PrintToConsole(client, " [ FAVORITE WEAPONS ]");
+		if (favT1 > 0) { GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); PrintToConsole(client, " Tier 1:             %s (%d Kills)", buf, favT1); }
+		if (favT2 > 0) { GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); PrintToConsole(client, " Tier 2:             %s (%d Kills)", buf, favT2); }
+		if (favT3 > 0) { GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); PrintToConsole(client, " Tier 3 / Special:   %s (%d Kills)", buf, favT3); }
+		if (favSec > 0) { GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); PrintToConsole(client, " Secondary / Melee:  %s (%d Kills)\n", buf, favSec); }
+	
+		PrintToConsole(client, " [ ALL WEAPONS ]\n %-20s %-8s %-8s %-8s %-8s\n ---------------------------------------------------------", "Weapon", "Kills", "Acc%", "HS%", "Fired");
+		for (int i = 0; i < g_iCleanWeaponCount; i++) {
+			WeaponStats wS;
+			wS = g_WeaponCampaignCache[client][i];
+			char key[64];
+			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (wS.fired == 0 && wS.kills == 0) continue;
+			GetPrettyWeaponName(key, buf, sizeof(buf));
+			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
+			float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
+			PrintToConsole(client, " %-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
+			
+			if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
+				int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
+				PrintToConsole(client, "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
+					wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
+			}
+	
+			if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
+				PrintToConsole(client, "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
+					wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
+			}
+		}
+	}
 	
     if (g_cvPrintDamageReceived.BoolValue) {
         int totalDmg = GetTotalDamageReceived(g_iDamageCampaignCache[client]);
@@ -3959,77 +4014,80 @@ void GeneratePrintFile(int client, bool isAuto)
     Format(lineBuffer, sizeof(lineBuffer), " Times Boomed On:    %-8d /  Car Alarms Triggered:%d\n", g_Lifetime[client].timesBoomed, g_Lifetime[client].carAlarmsTriggered);
     hFile.WriteLine(lineBuffer);
 
-    float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
-    float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
-    int totalGuns = bulletKills + shellKills;
-    float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
-    float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
-
-    hFile.WriteLine("[ WEAPON SUMMARY ]");
-    
-    Format(lineBuffer, sizeof(lineBuffer), "Firearms:           %.1f%%", gunPct);
-    hFile.WriteLine(lineBuffer);
-    
-    Format(lineBuffer, sizeof(lineBuffer), "Melee:              %.1f%%", meleePct);
-    hFile.WriteLine(lineBuffer);
-    
-    Format(lineBuffer, sizeof(lineBuffer), "Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
-    hFile.WriteLine(lineBuffer);
-
-    char buf[64];
-    hFile.WriteLine("[ FAVORITE WEAPONS ]");
-    if (favT1 > 0) { 
-        GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Tier 1:             %s (%d Kills)", buf, favT1); 
-        hFile.WriteLine(lineBuffer); 
-    }
-    if (favT2 > 0) { 
-        GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Tier 2:             %s (%d Kills)", buf, favT2); 
-        hFile.WriteLine(lineBuffer); 
-    }
-    if (favT3 > 0) { 
-        GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Tier 3 / Special:   %s (%d Kills)", buf, favT3); 
-        hFile.WriteLine(lineBuffer); 
-    }
-    if (favSec > 0) { 
-        GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Secondary / Melee:  %s (%d Kills)\n", buf, favSec); 
-        hFile.WriteLine(lineBuffer); 
-    }
-
-    hFile.WriteLine("[ ALL WEAPONS ]");
-    hFile.WriteLine("%-20s %-8s %-8s %-8s %-8s", "Weapon", "Kills", "Acc%", "HS%", "Fired");
-    hFile.WriteLine("---------------------------------------------------------");
-
-    for (int i = 0; i < g_iCleanWeaponCount; i++) {
-        WeaponStats wS;
-		wS = g_WeaponLifetimeCache[client][i];
-        char key[64];
-        strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
-		if (wS.fired == 0 && wS.kills == 0) continue;
-        GetPrettyWeaponName(key, buf, sizeof(buf));
-        float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
-        float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
-        
-        Format(lineBuffer, sizeof(lineBuffer), "%-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
-        hFile.WriteLine(lineBuffer);
-        
-        if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
-            int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
-            Format(lineBuffer, sizeof(lineBuffer), "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
-                wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
-            hFile.WriteLine(lineBuffer);
-        }
-
-        if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
-            Format(lineBuffer, sizeof(lineBuffer), "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
-                wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
-            hFile.WriteLine(lineBuffer);
-        }
-    }
+	if (g_cvPrintWeaponStats.BoolValue)
+	{
+		float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
+		float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
+		int totalGuns = bulletKills + shellKills;
+		float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
+		float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
+	
+		hFile.WriteLine("[ WEAPON SUMMARY ]");
+		
+		Format(lineBuffer, sizeof(lineBuffer), "Firearms:           %.1f%%", gunPct);
+		hFile.WriteLine(lineBuffer);
+		
+		Format(lineBuffer, sizeof(lineBuffer), "Melee:              %.1f%%", meleePct);
+		hFile.WriteLine(lineBuffer);
+		
+		Format(lineBuffer, sizeof(lineBuffer), "Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
+		hFile.WriteLine(lineBuffer);
+	
+		char buf[64];
+		hFile.WriteLine("[ FAVORITE WEAPONS ]");
+		if (favT1 > 0) { 
+			GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Tier 1:             %s (%d Kills)", buf, favT1); 
+			hFile.WriteLine(lineBuffer); 
+		}
+		if (favT2 > 0) { 
+			GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Tier 2:             %s (%d Kills)", buf, favT2); 
+			hFile.WriteLine(lineBuffer); 
+		}
+		if (favT3 > 0) { 
+			GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Tier 3 / Special:   %s (%d Kills)", buf, favT3); 
+			hFile.WriteLine(lineBuffer); 
+		}
+		if (favSec > 0) { 
+			GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Secondary / Melee:  %s (%d Kills)\n", buf, favSec); 
+			hFile.WriteLine(lineBuffer); 
+		}
+	
+		hFile.WriteLine("[ ALL WEAPONS ]");
+		hFile.WriteLine("%-20s %-8s %-8s %-8s %-8s", "Weapon", "Kills", "Acc%", "HS%", "Fired");
+		hFile.WriteLine("---------------------------------------------------------");
+	
+		for (int i = 0; i < g_iCleanWeaponCount; i++) {
+			WeaponStats wS;
+			wS = g_WeaponLifetimeCache[client][i];
+			char key[64];
+			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (wS.fired == 0 && wS.kills == 0) continue;
+			GetPrettyWeaponName(key, buf, sizeof(buf));
+			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
+			float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
+			
+			Format(lineBuffer, sizeof(lineBuffer), "%-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
+			hFile.WriteLine(lineBuffer);
+			
+			if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
+				int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
+				Format(lineBuffer, sizeof(lineBuffer), "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
+					wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
+				hFile.WriteLine(lineBuffer);
+			}
+	
+			if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
+				Format(lineBuffer, sizeof(lineBuffer), "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
+					wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
+				hFile.WriteLine(lineBuffer);
+			}
+		}
+	}
     
     if (g_cvPrintDamageReceived.BoolValue) {
         int totalDmg = GetTotalDamageReceived(g_iDamageLifetimeCache[client]);
@@ -4236,77 +4294,80 @@ void GenerateCampaignPrintFile(int client)
     Format(lineBuffer, sizeof(lineBuffer), " Times Boomed On:    %-8d /  Car Alarms Triggered:%d\n", g_Campaign[client].timesBoomed, g_Campaign[client].carAlarmsTriggered);
     hFile.WriteLine(lineBuffer);
 
-    float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
-    float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
-    int totalGuns = bulletKills + shellKills;
-    float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
-    float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
-
-    hFile.WriteLine("[ WEAPON SUMMARY ]");
+	if (g_cvPrintWeaponStats.BoolValue)
+	{
+		float gunPct = (totalKills > 0) ? (float(gunKills) / float(totalKills)) * 100.0 : 0.0;
+		float meleePct = (totalKills > 0) ? (float(meleeKills) / float(totalKills)) * 100.0 : 0.0;
+		int totalGuns = bulletKills + shellKills;
+		float bulletPct = (totalGuns > 0) ? (float(bulletKills) / float(totalGuns)) * 100.0 : 0.0;
+		float shellPct = (totalGuns > 0) ? (float(shellKills) / float(totalGuns)) * 100.0 : 0.0;
 	
-    Format(lineBuffer, sizeof(lineBuffer), "Firearms:           %.1f%%", gunPct);
-    hFile.WriteLine(lineBuffer);
-	
-    Format(lineBuffer, sizeof(lineBuffer), "Melee:              %.1f%%", meleePct);
-    hFile.WriteLine(lineBuffer);
-	
-    Format(lineBuffer, sizeof(lineBuffer), "Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
-    hFile.WriteLine(lineBuffer);
-
-    char buf[64];
-    hFile.WriteLine("[ FAVORITE WEAPONS ]");
-    if (favT1 > 0) { 
-        GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Tier 1:             %s (%d Kills)", buf, favT1); 
-        hFile.WriteLine(lineBuffer); 
-    }
-    if (favT2 > 0) { 
-        GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Tier 2:             %s (%d Kills)", buf, favT2); 
-        hFile.WriteLine(lineBuffer); 
-    }
-    if (favT3 > 0) { 
-        GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Tier 3 / Special:   %s (%d Kills)", buf, favT3); 
-        hFile.WriteLine(lineBuffer); 
-    }
-    if (favSec > 0) { 
-        GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); 
-        Format(lineBuffer, sizeof(lineBuffer), "Secondary / Melee:  %s (%d Kills)\n", buf, favSec); 
-        hFile.WriteLine(lineBuffer); 
-    }
-
-    hFile.WriteLine("[ ALL WEAPONS ]");
-    hFile.WriteLine("%-20s %-8s %-8s %-8s %-8s", "Weapon", "Kills", "Acc%", "HS%", "Fired");
-    hFile.WriteLine("---------------------------------------------------------");
-
-    for (int i = 0; i < g_iCleanWeaponCount; i++) {
-        WeaponStats wS;
-		wS = g_WeaponCampaignCache[client][i];
-        char key[64];
-        strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
-		if (wS.fired == 0 && wS.kills == 0) continue;
-        GetPrettyWeaponName(key, buf, sizeof(buf));
-        float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
-        float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
+		hFile.WriteLine("[ WEAPON SUMMARY ]");
 		
-        Format(lineBuffer, sizeof(lineBuffer), "%-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
-        hFile.WriteLine(lineBuffer);
+		Format(lineBuffer, sizeof(lineBuffer), "Firearms:           %.1f%%", gunPct);
+		hFile.WriteLine(lineBuffer);
 		
-        if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
-            int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
-            Format(lineBuffer, sizeof(lineBuffer), "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
-                wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
-            hFile.WriteLine(lineBuffer);
-        }
-
-        if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
-            Format(lineBuffer, sizeof(lineBuffer), "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
-                wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
-            hFile.WriteLine(lineBuffer);
-        }
-    }
+		Format(lineBuffer, sizeof(lineBuffer), "Melee:              %.1f%%", meleePct);
+		hFile.WriteLine(lineBuffer);
+		
+		Format(lineBuffer, sizeof(lineBuffer), "Bullets vs Shells:  %.1f%% Bullets / %.1f%% Shells\n", bulletPct, shellPct);
+		hFile.WriteLine(lineBuffer);
+	
+		char buf[64];
+		hFile.WriteLine("[ FAVORITE WEAPONS ]");
+		if (favT1 > 0) { 
+			GetPrettyWeaponName(sFavT1, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Tier 1:             %s (%d Kills)", buf, favT1); 
+			hFile.WriteLine(lineBuffer); 
+		}
+		if (favT2 > 0) { 
+			GetPrettyWeaponName(sFavT2, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Tier 2:             %s (%d Kills)", buf, favT2); 
+			hFile.WriteLine(lineBuffer); 
+		}
+		if (favT3 > 0) { 
+			GetPrettyWeaponName(sFavT3, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Tier 3 / Special:   %s (%d Kills)", buf, favT3); 
+			hFile.WriteLine(lineBuffer); 
+		}
+		if (favSec > 0) { 
+			GetPrettyWeaponName(sFavSec, buf, sizeof(buf)); 
+			Format(lineBuffer, sizeof(lineBuffer), "Secondary / Melee:  %s (%d Kills)\n", buf, favSec); 
+			hFile.WriteLine(lineBuffer); 
+		}
+	
+		hFile.WriteLine("[ ALL WEAPONS ]");
+		hFile.WriteLine("%-20s %-8s %-8s %-8s %-8s", "Weapon", "Kills", "Acc%", "HS%", "Fired");
+		hFile.WriteLine("---------------------------------------------------------");
+	
+		for (int i = 0; i < g_iCleanWeaponCount; i++) {
+			WeaponStats wS;
+			wS = g_WeaponCampaignCache[client][i];
+			char key[64];
+			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (wS.fired == 0 && wS.kills == 0) continue;
+			GetPrettyWeaponName(key, buf, sizeof(buf));
+			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
+			float hs  = (wS.hits > 0)  ? (float(wS.headshots) / float(wS.hits)) * 100.0 : 0.0;
+			
+			Format(lineBuffer, sizeof(lineBuffer), "%-20s %-8d %-8.1f%% %-8.1f%% %-8d", buf, wS.kills, (acc > 100.0 ? 100.0 : acc), (hs > 100.0 ? 100.0 : hs), wS.fired);
+			hFile.WriteLine(lineBuffer);
+			
+			if (wS.killsCommon > 0 || wS.killsSmoker > 0 || wS.killsBoomer > 0 || wS.killsHunter > 0 || wS.killsSpitter > 0 || wS.killsJockey > 0 || wS.killsCharger > 0 || wS.killsTank > 0 || wS.killsWitch > 0 || wS.tankDamage > 0 || wS.witchDamage > 0) {
+				int wSI = wS.killsSmoker + wS.killsBoomer + wS.killsHunter + wS.killsSpitter + wS.killsJockey + wS.killsCharger + wS.killsTank;
+				Format(lineBuffer, sizeof(lineBuffer), "   -> Common: %d | Total SI: %d (Sm:%d Bo:%d Hu:%d Sp:%d Jo:%d Ch:%d Tk:%d Wt:%d) | Tank Dmg: %d | Witch Dmg: %d", 
+					wS.killsCommon, wSI, wS.killsSmoker, wS.killsBoomer, wS.killsHunter, wS.killsSpitter, wS.killsJockey, wS.killsCharger, wS.killsTank, wS.killsWitch, wS.tankDamage, wS.witchDamage);
+				hFile.WriteLine(lineBuffer);
+			}
+	
+			if (wS.hunterSkeets > 0 || wS.witchCrowns > 0 || wS.tongueCuts > 0 || wS.chargerLevels > 0 || wS.rockSkeets > 0 || wS.spitterKilledPreSpat > 0) {
+				Format(lineBuffer, sizeof(lineBuffer), "   -> Feats: Skeets:%d | Witch Crowns:%d | Tongue Cuts:%d | Charger Levels:%d | Rock Skeets:%d | Spitters Pre-Spat:%d",
+					wS.hunterSkeets, wS.witchCrowns, wS.tongueCuts, wS.chargerLevels, wS.rockSkeets, wS.spitterKilledPreSpat);
+				hFile.WriteLine(lineBuffer);
+			}
+		}
+	}
 	
     if (g_cvPrintDamageReceived.BoolValue) {
         int totalDmg = GetTotalDamageReceived(g_iDamageCampaignCache[client]);
@@ -4882,6 +4943,10 @@ void RestoreCampaignStats(int client, const char[] auth)
 		g_Campaign[client].witchesStartled   = g_kvCampaignCache.GetNum("witches_startled");
         g_Campaign[client].timesBoomed       = g_kvCampaignCache.GetNum("times_boomed");
 		g_Campaign[client].carAlarmsTriggered = g_kvCampaignCache.GetNum("car_alarms_triggered");
+		
+		if (g_Campaign[client].campaignsPlayed < g_Campaign[client].campaignsWon) {
+            g_Campaign[client].campaignsPlayed = g_Campaign[client].campaignsWon;
+        }
     }
 
     WeaponStats zeroW;
@@ -4962,7 +5027,11 @@ bool ExportPlayerStatsToFile(int client, const char[] label)
     SanitizeFileName(sanitizedLabel, sizeof(sanitizedLabel));
 
     BuildPath(Path_SM, sPath, sizeof(sPath), "logs/stats_history/Export_%s_%s.cfg", safeAuth, sanitizedLabel);
-
+	
+	if (g_Lifetime[client].campaignsPlayed < g_Lifetime[client].campaignsWon) {
+        g_Lifetime[client].campaignsPlayed = g_Lifetime[client].campaignsWon;
+    }
+	
     KeyValues exportKV = new KeyValues("StatsHistory");
     exportKV.JumpToKey(auth, true);
 
@@ -5141,7 +5210,7 @@ void FlushAllCaches()
 // ====================================================================================================
 void LogActivity(const char[] format, any...)
 {
-    if (!g_cvEnable.BoolValue) return;
+    if (!g_cvEnable.BoolValue || !g_cvActivityLogsEnable.BoolValue) return;
 
     char buffer[256];
     VFormat(buffer, sizeof(buffer), format, 2);
@@ -5158,7 +5227,7 @@ void LogActivity(const char[] format, any...)
 
 void WriteActivityLog()
 {
-    if (g_hActivityLog.Length == 0) return;
+    if (!g_cvActivityLogsEnable.BoolValue || g_hActivityLog.Length == 0) return;
 
     char sMap[64], sDate[32], sDifficulty[32];
     GetCurrentMap(sMap, sizeof(sMap));
