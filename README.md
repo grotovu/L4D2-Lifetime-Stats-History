@@ -65,7 +65,10 @@ Steam's stats tracker is buggy. To satisfy my addiction to accurate lifetime and
 # Configuration
 An example of the config file at cfg/sourcemod/l4d2_stats_history.cfg
 ```
-// ConVars for plugin "l4d2_stats_history.smx"
+// Enable or disable writing activity logs to files? (0=No, 1=Yes)
+// -
+// Default: "1"
+l4d2_stats_history_activity_logs_enable "1"
 
 // Enable the Stats History tracking plugin?
 // -
@@ -81,6 +84,11 @@ l4d2_stats_history_print_damage_received "1"
 // -
 // Default: "2"
 l4d2_stats_history_print_mode "2"
+
+// Should weapon statistics be printed in show commands and log sheets? (0=No, 1=Yes)
+// -
+// Default: "1"
+l4d2_stats_history_print_weapon_stats "1"
 
 // Should a safety backup be created automatically before running reset commands? (0=No, 1=Yes)
 // -
