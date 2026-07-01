@@ -1507,7 +1507,10 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
             strcopy(src, sizeof(src), "world_damage");
         }
         UpdateDamageReceivedStat(victim, src, dmg);
-        g_sLastDamageSource[victim][0] = '\0';
+        int health = event.GetInt("health");
+        if (health > 0) {
+            g_sLastDamageSource[victim][0] = '\0';
+        }
     }
     
     bool isAttackerSurvivor = (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_SURVIVOR);
@@ -1660,7 +1663,17 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
 
             char sVictim[32];
             GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
-            LogActivity("%s died.", sVictim);
+			
+			char sCause[64], sPrettyCause[64];
+            strcopy(sCause, sizeof(sCause), g_sLastDamageSource[victim]);
+            if (sCause[0] == '\0') {
+                strcopy(sCause, sizeof(sCause), "world_damage");
+            }
+            GetPrettySourceName(sCause, sPrettyCause, sizeof(sPrettyCause));
+
+            LogActivity("%s died from %s.", sVictim, sPrettyCause);			
+			
+			g_sLastDamageSource[victim][0] = '\0';
         }
     }
 
