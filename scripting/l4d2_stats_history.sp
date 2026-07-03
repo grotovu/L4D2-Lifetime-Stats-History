@@ -287,6 +287,13 @@ char g_sLastDamageSource[MAXPLAYERS + 1][64];
 int g_iLastShover[MAXPLAYERS + 1];
 float g_fLastShoveTime[MAXPLAYERS + 1];
 
+int g_iCansPoured = 0;
+bool g_bIsPressingButton[MAXPLAYERS + 1] = { false, ... };
+float g_fLastButtonPressTime[MAX_ENTITIES_TRACKED];
+float g_fLastButtonCompleteTime[MAX_ENTITIES_TRACKED];
+float g_fLastButtonCancelTime[MAX_ENTITIES_TRACKED];
+float g_fLastFinaleTriggerTime;
+
 float g_fLastGameTime;
 Handle g_hSecondTimer = null;
 
@@ -465,7 +472,28 @@ public void OnPluginStart()
 	HookEvent("player_now_it",        Event_PlayerNowIt);
 	HookEvent("player_ledge_grab",    Event_PlayerLedgeGrab);
 	
+	HookEvent("finale_start", Event_FinaleStart, EventHookMode_PostNoCopy);
+	HookEvent("gauntlet_finale_start", Event_GauntletFinaleStart, EventHookMode_PostNoCopy);
+	HookEvent("finale_bridge_lowering", Event_FinaleBridgeLowering);
+	
+	HookEvent("survival_round_start", Event_SurvivalRoundStart, EventHookMode_PostNoCopy);
+	
+	HookEvent("gascan_pour_completed", Event_GasCanPourCompleted);
+	HookEvent("gascan_pour_interrupted", Event_GasCanPourInterrupted);
+	
 	HookEntityOutput("prop_car_alarm", "OnCarAlarmStart", Output_OnCarAlarmStart);
+
+	HookEntityOutput("func_button", "OnPressed", Output_OnButtonInstant);
+	HookEntityOutput("func_button_timed", "OnPressed", Output_OnButtonStartHold);
+	HookEntityOutput("func_button_timed", "OnTimeUp", Output_OnButtonCompleteHold);
+	HookEntityOutput("func_button_timed", "OnUnpressed", Output_OnButtonCancelHold);
+	HookEntityOutput("trigger_finale", "OnFirstStageStart", Output_OnFinaleTriggered);
+	HookEntityOutput("trigger_finale", "OnStartFinale", Output_OnFinaleTriggered);
+	HookEntityOutput("trigger_finale", "OnTrigger", Output_OnFinaleTriggered);
+	HookEntityOutput("trigger_finale", "OnFinaleStart", Output_OnFinaleTriggered);
+	
+	HookEntityOutput("point_prop_use_target", "OnUseFinished", Output_OnUseFinished);
+	HookEntityOutput("point_script_use_target", "OnUseFinished", Output_OnUseFinished);
 	
 	UserMsg pzDmgMsg = GetUserMessageId("PZDmgMsg");
     if (pzDmgMsg != INVALID_MESSAGE_ID) {
@@ -849,6 +877,7 @@ public void OnClientDisconnect(int client)
     g_iLastPinnedBy[client] = 0;
     g_fPinEndTime[client] = 0.0;
 	g_iPendingSkeetAttacker[client] = 0;
+	g_bIsPressingButton[client] = false;
 	
 	FlushKillsCache(client);
 	
@@ -1214,13 +1243,21 @@ public void SQL_Transaction_Failure(Database db, any data, int numQueries, const
 public void OnMapStart() 
 {
     g_fLastGameTime = 0.0;
+	g_iCansPoured = 0;
+	g_fLastFinaleTriggerTime = 0.0;
     
     for (int i = 1; i <= MaxClients; i++) {
         g_bHasWonCampaign[i] = false;
 		g_iLastCarDamager[i] = 0;
 		g_iLastShover[i] = 0;
         g_fLastShoveTime[i] = 0.0;
+		g_fLastButtonPressTime[i] = 0.0;
+		g_fLastButtonCompleteTime[i] = 0.0;
+		g_fLastButtonCancelTime[i] = 0.0;
     }
+	for (int i = 1; i <= MaxClients; i++) {
+		g_bIsPressingButton[i] = false;
+	}
     
     char mapName[64];
     GetCurrentMap(mapName, sizeof(mapName));
@@ -1292,6 +1329,8 @@ public void OnGameFrame()
 void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {    
     g_bPrintedThisRound = false;
 	g_bIsTransitionOrRestart = false;
+	g_iCansPoured = 0;
+	g_fLastFinaleTriggerTime = 0.0;
 	
 	for (int i = 1; i <= MaxClients; i++) {
         g_bTankAlive[i] = false;
@@ -1301,10 +1340,16 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 		g_iPinnedBy[i] = 0;
         g_iLastPinnedBy[i] = 0;
         g_fPinEndTime[i] = 0.0;
+		g_fLastButtonPressTime[i] = 0.0;
+		g_fLastButtonCompleteTime[i] = 0.0;
+		g_fLastButtonCancelTime[i] = 0.0;
         for (int j = 1; j <= MaxClients; j++) {
             g_fLastFFTime[i][j] = 0.0;
         }
     }
+	for (int i = 1; i <= MaxClients; i++) {
+		g_bIsPressingButton[i] = false;
+	}
 
     for (int w = 0; w < MAX_ENTITIES_TRACKED; w++) {
         g_iWitchDamageAwarded[w] = 0;
@@ -1446,6 +1491,44 @@ void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) {
         }
         SaveAndWriteAllStats();
     }
+}
+
+public void L4D2_OnSurvivalStart()
+{
+    int initiator = -1;
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsValidSurvivor(i))
+        {
+            int useEnt = GetEntPropEnt(i, Prop_Send, "m_hUseEntity");
+            if (useEnt > 0 && IsValidEntity(useEnt))
+            {
+                char classname[64];
+                GetEntityClassname(useEnt, classname, sizeof(classname));
+                if (strcmp(classname, "trigger_finale") == 0 || strcmp(classname, "func_button") == 0)
+                {
+                    initiator = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    char sName[32];
+    if (initiator != -1)
+    {
+        GetPlayerNameSafe(initiator, sName, sizeof(sName));
+        LogActivity("%s triggered the console and started Survival!", sName);
+    }
+    else
+    {
+        LogActivity("Survival Mode has been started!");
+    }
+}
+
+public void Event_SurvivalRoundStart(Event event, const char[] name, bool dontBroadcast)
+{
+    L4D2_OnSurvivalStart();
 }
 
 void Event_WeaponFire(Event event, const char[] name, bool dontBroadcast) {
@@ -5353,4 +5436,285 @@ void GetPlayerNameSafe(int client, char[] buffer, int maxlen)
     {
         GetClientName(client, buffer, maxlen);
     }
+}
+
+// ====================================================================================================
+//                  INTERACTION LOGGING CALLBACKS
+// ====================================================================================================
+
+public void Event_GasCanPourCompleted(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client <= 0 || !IsClientInGame(client)) return;
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+
+    int goal = GameRules_GetProp("m_nScavengeItemsGoal");
+    g_iCansPoured++;
+
+    if (goal > 0)
+    {
+        int left = goal - g_iCansPoured;
+        if (left < 0) left = 0;
+
+        LogActivity("%s poured a gas can. [Progress: %d/%d poured, %d left]", sPlayerName, g_iCansPoured, goal, left);
+    }
+    else
+    {
+        LogActivity("%s poured a gas can.", sPlayerName);
+    }
+}
+
+public void Event_GasCanPourInterrupted(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client <= 0 || !IsClientInGame(client)) return;
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+
+    LogActivity("%s's gas can pouring was interrupted.", sPlayerName);
+}
+
+public void Output_OnButtonInstant(const char[] output, int caller, int activator, float delay)
+{
+    if (activator <= 0 || activator > MaxClients || !IsClientInGame(activator)) return;
+
+    if (caller > 0 && caller < MAX_ENTITIES_TRACKED)
+    {
+        float curTime = GetGameTime();
+        if (curTime - g_fLastButtonPressTime[caller] < 1.0)
+        {
+            return;
+        }
+        g_fLastButtonPressTime[caller] = curTime;
+    }
+
+    char sPlayerName[32], sBtnName[64];
+    GetPlayerNameSafe(activator, sPlayerName, sizeof(sPlayerName));
+    GetEntPropString(caller, Prop_Data, "m_iName", sBtnName, sizeof(sBtnName));
+
+    if (sBtnName[0] == '\0') strcopy(sBtnName, sizeof(sBtnName), "Unnamed Button");
+
+    if (StrContains(sBtnName, "radio", false) != -1)
+    {
+        LogActivity("%s initiated the rescue radio dialogue!", sPlayerName);
+    }
+    else
+    {
+        LogActivity("%s pressed button [%s].", sPlayerName, sBtnName);
+    }
+}
+
+public void Output_OnButtonStartHold(const char[] output, int caller, int activator, float delay)
+{
+    if (activator <= 0 || activator > MaxClients || !IsClientInGame(activator)) return;
+
+    float curTime = GetGameTime();
+    if (caller > 0 && caller < MAX_ENTITIES_TRACKED)
+    {
+        if (curTime - g_fLastButtonPressTime[caller] < 1.0) return;
+        g_fLastButtonPressTime[caller] = curTime;
+    }
+
+    g_bIsPressingButton[activator] = true;
+
+    char sPlayerName[32], sBtnName[64];
+    GetPlayerNameSafe(activator, sPlayerName, sizeof(sPlayerName));
+    GetEntPropString(caller, Prop_Data, "m_iName", sBtnName, sizeof(sBtnName));
+
+    if (sBtnName[0] == '\0') strcopy(sBtnName, sizeof(sBtnName), "Unnamed Timed Button");
+
+    LogActivity("%s started pressing button [%s]...", sPlayerName, sBtnName);
+}
+
+public void Output_OnButtonCompleteHold(const char[] output, int caller, int activator, float delay)
+{
+    int player = activator;
+
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player))
+    {
+        for (int i = 1; i <= MaxClients; i++) {
+            if (g_bIsPressingButton[i]) { player = i; break; }
+        }
+    }
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player)) return;
+
+    float curTime = GetGameTime();
+    if (caller > 0 && caller < MAX_ENTITIES_TRACKED)
+    {
+        if (curTime - g_fLastButtonCompleteTime[caller] < 1.0) return;
+        g_fLastButtonCompleteTime[caller] = curTime;
+    }
+
+    g_bIsPressingButton[player] = false;
+
+    char sPlayerName[32], sBtnName[64];
+    GetPlayerNameSafe(player, sPlayerName, sizeof(sPlayerName));
+    GetEntPropString(caller, Prop_Data, "m_iName", sBtnName, sizeof(sBtnName));
+
+    if (sBtnName[0] == '\0') strcopy(sBtnName, sizeof(sBtnName), "Unnamed Timed Button");
+
+    LogActivity("%s completed pressing button [%s]!", sPlayerName, sBtnName);
+}
+
+public void Output_OnButtonCancelHold(const char[] output, int caller, int activator, float delay)
+{
+    int player = activator;
+
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player))
+    {
+        for (int i = 1; i <= MaxClients; i++) {
+            if (g_bIsPressingButton[i]) { player = i; break; }
+        }
+    }
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player)) return;
+
+    float curTime = GetGameTime();
+    if (caller > 0 && caller < MAX_ENTITIES_TRACKED)
+    {
+        if (curTime - g_fLastButtonCancelTime[caller] < 1.0) return;
+        g_fLastButtonCancelTime[caller] = curTime;
+    }
+
+    g_bIsPressingButton[player] = false;
+
+    char sPlayerName[32], sBtnName[64];
+    GetPlayerNameSafe(player, sPlayerName, sizeof(sPlayerName));
+    GetEntPropString(caller, Prop_Data, "m_iName", sBtnName, sizeof(sBtnName));
+
+    if (sBtnName[0] == '\0') strcopy(sBtnName, sizeof(sBtnName), "Unnamed Timed Button");
+
+    LogActivity("%s stopped pressing button [%s] (unfinished).", sPlayerName, sBtnName);
+}
+
+public void Output_OnFinaleTriggered(const char[] output, int caller, int activator, float delay)
+{
+    int player = activator;
+
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player))
+    {
+        for (int i = 1; i <= MaxClients; i++) {
+            if (IsValidSurvivor(i)) { player = i; break; }
+        }
+    }
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player)) return;
+
+    float curTime = GetGameTime();
+    if (curTime - g_fLastFinaleTriggerTime < 2.0) return;
+    g_fLastFinaleTriggerTime = curTime;
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(player, sPlayerName, sizeof(sPlayerName));
+
+    LogActivity("%s activated the finale trigger!", sPlayerName);
+}
+
+public void Output_OnUseFinished(const char[] output, int caller, int activator, float delay)
+{
+    if (activator <= 0 || activator > MaxClients || !IsClientInGame(activator)) return;
+
+    char sName[64];
+    GetEntPropString(caller, Prop_Data, "m_iName", sName, sizeof(sName));
+
+    if (StrContains(sName, "nozzle", false) != -1)
+    {
+        return;
+    }
+
+    float curTime = GetGameTime();
+    if (caller > 0 && caller < MAX_ENTITIES_TRACKED)
+    {
+        if (curTime - g_fLastButtonCompleteTime[caller] < 1.0) return;
+        g_fLastButtonCompleteTime[caller] = curTime;
+    }
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(activator, sPlayerName, sizeof(sPlayerName));
+
+    if (sName[0] == '\0') strcopy(sName, sizeof(sName), "Unnamed Use Target");
+
+    LogActivity("%s completed interaction with [%s]!", sPlayerName, sName);
+}
+
+public void Event_FinaleStart(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    float curTime = GetGameTime();
+    if (curTime - g_fLastFinaleTriggerTime < 2.0) return;
+    g_fLastFinaleTriggerTime = curTime;
+
+    int initiator = GetClosestSurvivorToFinale();
+    if (initiator <= 0) return;
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(initiator, sPlayerName, sizeof(sPlayerName));
+
+    LogActivity("%s started the finale!", sPlayerName);
+}
+
+public void Event_GauntletFinaleStart(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    float curTime = GetGameTime();
+    if (curTime - g_fLastFinaleTriggerTime < 2.0) return;
+    g_fLastFinaleTriggerTime = curTime;
+
+    int initiator = GetClosestSurvivorToFinale();
+    if (initiator <= 0) return;
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(initiator, sPlayerName, sizeof(sPlayerName));
+
+    LogActivity("%s started the gauntlet finale!", sPlayerName);
+}
+
+public void Event_FinaleBridgeLowering(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client <= 0 || !IsClientInGame(client)) return;
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+
+    LogActivity("%s triggered the bridge lowering mechanism!", sPlayerName);
+}
+
+int GetClosestSurvivorToFinale()
+{
+    int targetEnt = -1;
+    while ((targetEnt = FindEntityByClassname(targetEnt, "trigger_finale")) != -1)
+    {
+        float targetPos[3];
+        GetEntPropVector(targetEnt, Prop_Send, "m_vecOrigin", targetPos);
+
+        int closestPlayer = -1;
+        float minDistance = 999999.0;
+
+        for (int i = 1; i <= MaxClients; i++)
+        {
+            if (IsValidSurvivor(i) && IsPlayerAlive(i))
+            {
+                float playerPos[3];
+                GetClientAbsOrigin(i, playerPos);
+                float dist = GetVectorDistance(playerPos, targetPos);
+                if (dist < minDistance)
+                {
+                    minDistance = dist;
+                    closestPlayer = i;
+                }
+            }
+        }
+        return closestPlayer;
+    }
+    return -1;
 }
