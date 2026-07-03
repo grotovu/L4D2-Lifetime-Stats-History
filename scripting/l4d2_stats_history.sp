@@ -324,6 +324,7 @@ ConVar g_cvPrintDamageReceived;
 ConVar g_cvResetBackup;
 ConVar g_cvPrintWeaponStats;
 ConVar g_cvActivityLogsEnable;
+ConVar g_cvActivityChatEnable;
 
 Database g_hDatabase = null;
 bool g_bIsDatabaseSaving = false;
@@ -388,6 +389,7 @@ public void OnPluginStart()
 	g_cvPrintWeaponStats = CreateConVar("l4d2_stats_history_print_weapon_stats", "1", "Should weapon statistics be printed in show commands and log sheets? (0=No, 1=Yes)");
 	g_cvPrintDamageReceived = CreateConVar("l4d2_stats_history_print_damage_received", "1", "Should damage received statistics be printed in show commands and log sheets? (0=No, 1=Yes)");	
 	g_cvActivityLogsEnable = CreateConVar("l4d2_stats_history_activity_logs_enable", "1", "Enable or disable writing activity logs to files? (0=No, 1=Yes)");
+	g_cvActivityChatEnable = CreateConVar("l4d2_stats_history_activity_chat", "1", "Display activity logs in the in-game chat HUD? (0=No, 1=Yes)");
 	
 	g_cvBotNames[0] = FindConVar("l4d2_custom_bot_name_nick");
 	g_cvBotNames[1] = FindConVar("l4d2_custom_bot_name_rochelle");
@@ -5319,6 +5321,11 @@ void LogActivity(const char[] format, any...)
     Format(timestampedLine, sizeof(timestampedLine), "[%02d:%02d:%02d] %s", h, m, s, buffer);
 
     g_hActivityLog.PushString(timestampedLine);
+
+    if (g_cvActivityChatEnable.BoolValue)
+    {
+        PrintToChatAll("\x04[Activity] \x01%s", buffer);
+    }
 }
 
 void WriteActivityLog()
