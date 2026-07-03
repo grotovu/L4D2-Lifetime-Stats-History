@@ -263,14 +263,13 @@ int g_iLastDeathTick[MAXPLAYERS + 1];
 char g_sLastDeathWeapon[MAXPLAYERS + 1][64];
 char g_sLastCleanWeapon[MAXPLAYERS + 1][64];
 
-bool g_bSpitterSpat[MAXPLAYERS + 1];
 int g_iPendingSkeetAttacker[MAXPLAYERS + 1];
 float g_fLastSkeetTime[MAXPLAYERS + 1];
 
 bool g_bTankAlive[MAXPLAYERS + 1];
 int  g_iTankLastHealth[MAXPLAYERS + 1];
 int g_iDamageToTank[MAXPLAYERS + 1][MAXPLAYERS + 1];
-bool g_bRockSkeeted[MAX_ENTITIES_TRACKED];
+int g_iLastRockSkeetTick[MAXPLAYERS + 1] = { -1, ... };
 
 int  g_iWitchDamageAwarded[MAX_ENTITIES_TRACKED];
 int g_iWitchFirstHitTick[MAX_ENTITIES_TRACKED];
@@ -337,9 +336,7 @@ ConVar g_cvBotNames[8] = { null, ... };
 char g_sCachedBotNames[8][64];
 bool g_bTankBurnt[MAXPLAYERS + 1];
 bool g_bWitchBurnt[MAX_ENTITIES_TRACKED];
-bool g_bSkeetedOrLeveled[MAXPLAYERS + 1];
 float g_fLastFFTime[MAXPLAYERS + 1][MAXPLAYERS + 1];
-int g_iLastCarDamager[MAX_ENTITIES_TRACKED];
 
 // ====================================================================================================
 //					PLUGIN START & END
@@ -446,9 +443,12 @@ public void OnPluginStart()
 	HookEvent("weapon_given", 		Event_WeaponGiven);
 	HookEvent("infected_hurt",        Event_InfectedHurt);
 	HookEvent("tank_spawn",           Event_TankSpawn);
+	HookEvent("tank_rock_killed", 	  Event_TankRockKilled);
 	HookEvent("player_spawn",         Event_PlayerSpawn);
 	HookEvent("player_bot_replace",   Event_BotReplacedPlayer);
 	HookEvent("bot_player_replace",   Event_PlayerReplacedBot);
+	
+	HookEvent("spitter_killed", 	  Event_SpitterKilled);
 	
     HookEvent("tongue_grab",          Event_PinStart);
     HookEvent("lunge_pounce",         Event_PinStart);
@@ -465,14 +465,18 @@ public void OnPluginStart()
     HookEvent("pounce_stopped",       Event_SaveFromPin);
     HookEvent("jockey_ride_end",      Event_SaveFromPin);
     HookEvent("charger_pummel_end",   Event_SaveFromPin);
-	
-	HookEvent("ability_use", 		  Event_AbilityUse);
+
 	HookEvent("tongue_pull_stopped",  Event_TonguePullStopped);
 	HookEvent("player_shoved",        Event_PlayerShoved);
+	
+	HookEvent("hunter_punched", 	  Event_HunterPunched);
+	HookEvent("jockey_punched", 	  Event_JockeyPunched);
 	
 	HookEvent("witch_harasser_set",   Event_WitchHarasserSet);
 	HookEvent("player_now_it",        Event_PlayerNowIt);
 	HookEvent("player_ledge_grab",    Event_PlayerLedgeGrab);
+	
+	HookEvent("triggered_car_alarm", Event_TriggeredCarAlarm);
 	
 	HookEvent("finale_start", Event_FinaleStart, EventHookMode_PostNoCopy);
 	HookEvent("gauntlet_finale_start", Event_GauntletFinaleStart, EventHookMode_PostNoCopy);
@@ -482,8 +486,6 @@ public void OnPluginStart()
 	
 	HookEvent("gascan_pour_completed", Event_GasCanPourCompleted);
 	HookEvent("gascan_pour_interrupted", Event_GasCanPourInterrupted);
-	
-	HookEntityOutput("prop_car_alarm", "OnCarAlarmStart", Output_OnCarAlarmStart);
 
 	HookEntityOutput("func_button", "OnPressed", Output_OnButtonInstant);
 	HookEntityOutput("func_button_timed", "OnPressed", Output_OnButtonStartHold);
@@ -829,6 +831,7 @@ public void OnClientPostAdminCheck(int client)
 	for (int i = 0; i < 128; i++) {
         g_iCachedCommonKills[client][i] = 0;
         g_iCachedTotalKills[client][i] = 0;
+		g_iLastRockSkeetTick[client] = -1;
     }
 
     if (!IsFakeClient(client))
@@ -1250,7 +1253,6 @@ public void OnMapStart()
     
     for (int i = 1; i <= MaxClients; i++) {
         g_bHasWonCampaign[i] = false;
-		g_iLastCarDamager[i] = 0;
 		g_iLastShover[i] = 0;
         g_fLastShoveTime[i] = 0.0;
 		g_fLastButtonPressTime[i] = 0.0;
@@ -1337,8 +1339,8 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 	for (int i = 1; i <= MaxClients; i++) {
         g_bTankAlive[i] = false;
         g_bTankBurnt[i] = false;
-        g_bSkeetedOrLeveled[i] = false;
         g_iTankLastHealth[i] = 0;
+		g_iLastRockSkeetTick[i] = -1;
 		g_iPinnedBy[i] = 0;
         g_iLastPinnedBy[i] = 0;
         g_fPinEndTime[i] = 0.0;
@@ -1703,10 +1705,6 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
     } else {
         clean[0] = '\0';
     }
-	
-    if (victim > 0 && victim <= MaxClients) {
-        g_bSkeetedOrLeveled[victim] = false;
-    }
 
     if (victim == 0)
     {
@@ -1836,11 +1834,8 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
 	if ((zombieClass == 3 || zombieClass == 6) && g_iPendingSkeetAttacker[victim] == attacker && (GetGameTime() - g_fLastSkeetTime[victim]) < 0.2) {
         bIsSpecialFeat = true;
     }
-    else if (zombieClass == 4 && !g_bSpitterSpat[victim]) {
-        bIsSpecialFeat = true;
-    }
 
-    if (zombieClass >= 1 && zombieClass <= 6) {
+    if (zombieClass >= 1 && zombieClass <= 6 && zombieClass != 4) {
         if (!bIsSpecialFeat) {
             char sAttacker[32], sVictim[32], prettyWPN[64], sInfected[16];
             GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
@@ -1851,7 +1846,6 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 case 1: strcopy(sInfected, sizeof(sInfected), "Smoker");
                 case 2: strcopy(sInfected, sizeof(sInfected), "Boomer");
                 case 3: strcopy(sInfected, sizeof(sInfected), "Hunter");
-                case 4: strcopy(sInfected, sizeof(sInfected), "Spitter");
                 case 5: strcopy(sInfected, sizeof(sInfected), "Jockey");
                 case 6: strcopy(sInfected, sizeof(sInfected), "Charger");
             }
@@ -1889,16 +1883,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
         case 4: 
         { 
             ADD_STAT(attacker, killsSpitter); 
-            UpdateWeaponStat(attacker, clean, 8); 
-
-            if (!g_bSpitterSpat[victim]) {
-                ADD_STAT(attacker, spitterKilledPreSpat);
-                UpdateWeaponStat(attacker, clean, 20);
-
-                char sAttacker[32];
-                GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
-                LogActivity("%s killed a Spitter before she could spit.", sAttacker);
-            }
+            UpdateWeaponStat(attacker, clean, 8);
         }
         case 5: 
         { 
@@ -2033,6 +2018,84 @@ void Event_InfectedHurt(Event event, const char[] name, bool dontBroadcast)
     }
 }
 
+void Event_SpitterKilled(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int attacker = GetClientOfUserId(event.GetInt("attacker"));
+    int victim = GetClientOfUserId(event.GetInt("userid"));
+
+    if (attacker <= 0 || attacker > MaxClients || !IsClientInGame(attacker) || GetClientTeam(attacker) != TEAM_SURVIVOR) return;
+    if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim)) return;
+
+    bool hasSpit = false;
+    int ability = GetEntPropEnt(victim, Prop_Send, "m_customAbility");
+    if (ability > 0 && IsValidEntity(ability))
+    {
+        hasSpit = view_as<bool>(GetEntProp(ability, Prop_Send, "m_hasBeenUsed"));
+    }
+
+    char clean[64];
+    int wEnt = GetEntPropEnt(attacker, Prop_Send, "m_hActiveWeapon");
+    if (wEnt > 0 && IsValidEntity(wEnt)) {
+        char cls[64]; 
+        GetEntityClassname(wEnt, cls, sizeof(cls));
+        GetCleanWeaponName(attacker, cls, clean, sizeof(clean), wEnt);
+    } else {
+        clean[0] = '\0';
+    }
+
+    char sAttacker[32], sVictim[32], prettyWPN[64];
+    GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
+    GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
+    GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
+
+    if (!hasSpit)
+    {
+        ADD_STAT(attacker, spitterKilledPreSpat);
+        UpdateWeaponStat(attacker, clean, 20);
+        LogActivity("%s killed a Spitter before she could spit with %s.", sAttacker, prettyWPN);
+    }
+    else
+    {
+        LogActivity("%s killed %s (Spitter) with %s.", sAttacker, sVictim, prettyWPN);
+    }
+}
+
+void Event_HunterPunched(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int attacker = GetClientOfUserId(event.GetInt("userid"));
+    bool isLunging = event.GetBool("islunging");
+
+    if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && isLunging)
+    {
+        ADD_STAT(attacker, hunterDeadstops);
+
+        char sAttacker[32];
+        GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
+        LogActivity("%s deadstopped a pouncing Hunter.", sAttacker);
+    }
+}
+
+void Event_JockeyPunched(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int attacker = GetClientOfUserId(event.GetInt("userid"));
+    bool isLunging = event.GetBool("islunging");
+
+    if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && isLunging)
+    {
+        ADD_STAT(attacker, jockeyDeadstops);
+
+        char sAttacker[32];
+        GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
+        LogActivity("%s deadstopped a leaping Jockey.", sAttacker);
+    }
+}
+
 void Event_WitchKilled(Event event, const char[] name, bool dontBroadcast) {
     int attacker = GetClientOfUserId(event.GetInt("userid"));
     int witch = event.GetInt("witchid");
@@ -2103,48 +2166,6 @@ public void OnEntityCreated(int entity, const char[] classname)
                 g_iDamageToWitch[entity][i] = 0;
             }
         }
-    }   
-    
-    if (classname[0] == 't' && StrEqual(classname, "tank_rock"))
-    {
-        if (entity > 0 && entity < MAX_ENTITIES_TRACKED) {
-            g_bRockSkeeted[entity] = false;
-        }
-        SDKHook(entity, SDKHook_OnTakeDamage, OnRockTakeDamage);
-    }
-	
-	if (classname[0] == 'p' && strcmp(classname, "prop_car_alarm") == 0) {
-        if (entity > 0 && entity < MAX_ENTITIES_TRACKED) {
-            g_iLastCarDamager[entity] = 0;
-            SDKHook(entity, SDKHook_OnTakeDamage, OnCarAlarmTakeDamage);
-        }
-    }
-}
-
-public Action OnCarAlarmTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damageCustom)
-{
-    if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker)) {
-        g_iLastCarDamager[victim] = attacker;
-    }
-    return Plugin_Continue;
-}
-
-public void Output_OnCarAlarmStart(const char[] output, int caller, int activator, float delay)
-{
-    int shooter = activator;
-    if (caller > 0 && caller < MAX_ENTITIES_TRACKED) {
-        if (g_iLastCarDamager[caller] > 0 && IsClientInGame(g_iLastCarDamager[caller])) {
-            shooter = g_iLastCarDamager[caller];
-        }
-    }
-
-    if (shooter > 0 && shooter <= MaxClients && IsClientInGame(shooter))
-    {
-        ADD_STAT(shooter, carAlarmsTriggered);
-		
-		char sName[32];
-        GetPlayerNameSafe(shooter, sName, sizeof(sName));
-        LogActivity("%s triggered the car alarm!", sName);		
     }
 }
 
@@ -2156,7 +2177,6 @@ public void OnEntityDestroyed(int entity)
         g_iWitchFirstHitTick[entity] = 0;
         g_bIsWitchHeadshot[entity] = false;
         g_bIsWitchEntity[entity] = false;
-		g_bRockSkeeted[entity] = false;
 		
 		for (int i = 1; i <= MaxClients; i++) {
             g_iDamageToWitch[entity][i] = 0;
@@ -2343,8 +2363,6 @@ void Event_TankSpawn(Event event, const char[] name, bool dontBroadcast) {
 void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
 	int client = GetClientOfUserId(event.GetInt("userid"));	
     if (client < 1 || client > MaxClients || !IsClientInGame(client)) return;
-	
-	g_bSpitterSpat[client] = false;
 
 	if (GetClientTeam(client) == TEAM_INFECTED && GetEntProp(client, Prop_Send, "m_zombieClass") == 8) {
 		g_bTankAlive[client] = true;
@@ -2357,8 +2375,6 @@ void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
 void Event_BotReplacedPlayer(Event event, const char[] name, bool dontBroadcast) {
 	int p = GetClientOfUserId(event.GetInt("player")), b = GetClientOfUserId(event.GetInt("bot"));
 	if (p <= 0 || p > MaxClients || b <= 0 || b > MaxClients) return;
-	
-	g_bSpitterSpat[b] = g_bSpitterSpat[p]; 
 	
 	UpdateClientCache(b);
 
@@ -2378,8 +2394,6 @@ void Event_BotReplacedPlayer(Event event, const char[] name, bool dontBroadcast)
 void Event_PlayerReplacedBot(Event event, const char[] name, bool dontBroadcast) {
 	int p = GetClientOfUserId(event.GetInt("player")), b = GetClientOfUserId(event.GetInt("bot"));
 	if (p <= 0 || p > MaxClients || b <= 0 || b > MaxClients) return;
-	
-	g_bSpitterSpat[p] = g_bSpitterSpat[b];
 	
 	UpdateClientCache(p);
 
@@ -2418,61 +2432,36 @@ public void OnWeaponSwitchPost(int client, int weapon)
     }
 }
 
-public Action OnRockTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damageCustom)
+void Event_TankRockKilled(Event event, const char[] name, bool dontBroadcast)
 {
-    if (attacker <= 0 || attacker > MaxClients || !IsClientInGame(attacker)) return Plugin_Continue;
-    if (!IsSurvivor(attacker)) return Plugin_Continue;
-    
-    if (victim <= 0 || victim >= MAX_ENTITIES_TRACKED || g_bRockSkeeted[victim]) return Plugin_Continue;
+    if (!g_cvEnable.BoolValue) return;
 
-    if (damagetype & 8) return Plugin_Continue; 
-
-    if (inflictor > 0 && IsValidEntity(inflictor)) {
-        char infClass[64];
-        GetEntityClassname(inflictor, infClass, sizeof(infClass));
-        if (strcmp(infClass, "inferno") == 0 || strcmp(infClass, "entityflame") == 0) {
-            return Plugin_Continue;
-        }
-    }
-
-    int health = GetEntProp(victim, Prop_Data, "m_iHealth");
-    if (damage >= health)
-    {
-        g_bRockSkeeted[victim] = true;
-        ADD_STAT(attacker, rockSkeets);
-        
-        char clean[64];
-        int wEnt = weapon;
-        if (wEnt <= 0 || !IsValidEntity(wEnt)) {
-            wEnt = GetEntPropEnt(attacker, Prop_Send, "m_hActiveWeapon");
-        }
-        if (wEnt > 0 && IsValidEntity(wEnt)) {
-            char cls[64]; GetEntityClassname(wEnt, cls, sizeof(cls));
-            GetCleanWeaponName(attacker, cls, clean, sizeof(clean), wEnt);
-        } else {
-            clean[0] = '\0';
-        }
-        
-        if (clean[0] != '\0') {
-            UpdateWeaponStat(attacker, clean, 19);
-            
-            char sAttacker[32], prettyWPN[64];
-            GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
-            GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-            LogActivity("%s skeeted a Tank rock with %s.", sAttacker, prettyWPN);
-        }
-    }
-    return Plugin_Continue;
-}
-
-void Event_AbilityUse(Event event, const char[] name, bool dontBroadcast) {
     int client = GetClientOfUserId(event.GetInt("userid"));
-    if (client > 0 && client <= MaxClients && IsClientInGame(client)) {
-        char abilityName[64];
-        event.GetString("ability", abilityName, sizeof(abilityName));
-        if (StrEqual(abilityName, "ability_spit")) {
-            g_bSpitterSpat[client] = true;
-        }
+    if (client <= 0 || client > MaxClients || !IsClientInGame(client) || GetClientTeam(client) != TEAM_SURVIVOR) return;
+
+    int tick = GetGameTickCount();
+    if (g_iLastRockSkeetTick[client] == tick) return;
+    g_iLastRockSkeetTick[client] = tick;
+
+    ADD_STAT(client, rockSkeets);
+
+    char clean[64];
+    int wEnt = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+    if (wEnt > 0 && IsValidEntity(wEnt)) {
+        char cls[64]; 
+        GetEntityClassname(wEnt, cls, sizeof(cls));
+        GetCleanWeaponName(client, cls, clean, sizeof(clean), wEnt);
+    } else {
+        clean[0] = '\0';
+    }
+
+    if (clean[0] != '\0') {
+        UpdateWeaponStat(client, clean, 19);
+
+        char sAttacker[32], prettyWPN[64];
+        GetPlayerNameSafe(client, sAttacker, sizeof(sAttacker));
+        GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
+        LogActivity("%s skeeted a Tank rock with %s.", sAttacker, prettyWPN);
     }
 }
 
@@ -2534,30 +2523,6 @@ void Event_PlayerShoved(Event event, const char[] name, bool dontBroadcast) {
     if (attacker > 0 && victim > 0 && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_INFECTED) {
         g_iLastShover[victim] = attacker;
         g_fLastShoveTime[victim] = GetGameTime();
-    }
-
-    if (!IsSurvivor(attacker)) return;
-    if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim) || GetClientTeam(victim) != TEAM_INFECTED) return;
-
-    int zombieClass = GetEntProp(victim, Prop_Send, "m_zombieClass");
-    
-    if (zombieClass == 3) {
-        if (!(GetEntityFlags(victim) & FL_ONGROUND) && GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce")) {
-            ADD_STAT(attacker, hunterDeadstops);
-            
-            char sAttacker[32];
-            GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
-            LogActivity("%s deadstopped a pouncing Hunter.", sAttacker);
-        }
-    }
-    else if (zombieClass == 5) {
-        if (!(GetEntityFlags(victim) & FL_ONGROUND)) {
-            ADD_STAT(attacker, jockeyDeadstops);
-            
-            char sAttacker[32];
-            GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
-            LogActivity("%s deadstopped a leaping Jockey.", sAttacker);
-        }
     }
 }
 
@@ -2817,6 +2782,21 @@ void Event_PinStop(Event event, const char[] name, bool dontBroadcast)
 
         g_iPinnedBy[victim] = 0;
         g_fPinEndTime[victim] = GetGameTime();
+    }
+}
+
+void Event_TriggeredCarAlarm(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client > 0 && client <= MaxClients && IsClientInGame(client))
+    {
+        ADD_STAT(client, carAlarmsTriggered);
+
+        char sName[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        LogActivity("%s triggered the car alarm!", sName);
     }
 }
 
