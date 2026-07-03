@@ -340,6 +340,7 @@ char g_sCachedBotNames[8][64];
 bool g_bTankBurnt[MAXPLAYERS + 1];
 bool g_bWitchBurnt[MAX_ENTITIES_TRACKED];
 float g_fLastFFTime[MAXPLAYERS + 1][MAXPLAYERS + 1];
+bool g_bIsBlackAndWhite[MAXPLAYERS + 1] = { false, ... };
 
 // ====================================================================================================
 //					PLUGIN START & END
@@ -887,6 +888,7 @@ public void OnClientDisconnect(int client)
     g_fPinEndTime[client] = 0.0;
 	g_iPendingSkeetAttacker[client] = 0;
 	g_bIsPressingButton[client] = false;
+	g_bIsBlackAndWhite[client] = false;
 	
 	FlushKillsCache(client);
 	
@@ -1744,6 +1746,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
 
     if (victim > 0 && victim <= MaxClients) {
         g_bTankAlive[victim] = false;
+		g_bIsBlackAndWhite[victim] = false;
         
         if (IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR) {
             ADD_STAT(victim, deaths);
@@ -2636,6 +2639,11 @@ void Event_HealSuccess(Event event, const char[] n, bool d) {
             ADD_STAT(h, medkitsShared);
             LogActivity("%s healed %s.", sHealer, sSubject);
         }
+		
+		if (s > 0 && s <= MaxClients && g_bIsBlackAndWhite[s]) {
+            g_bIsBlackAndWhite[s] = false;
+            LogActivity("%s is no longer Black and White.", sSubject);
+        }
     }
     
     if (s > 0 && s <= MaxClients && IsClientInGame(s) && GetClientTeam(s) == TEAM_SURVIVOR) {
@@ -2675,7 +2683,7 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
         }
     }
 
-    if (IsValidSurvivor(client) && IsValidSurvivor(subject)) {
+    if (IsSurvivor(client) && IsSurvivor(subject)) {
         char sActor[32], sRecipient[32];
         GetPlayerNameSafe(client, sActor, sizeof(sActor));
         GetPlayerNameSafe(subject, sRecipient, sizeof(sRecipient));
@@ -2683,6 +2691,11 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
             LogActivity("%s pulled %s back up from a ledge.", sActor, sRecipient);
         } else {
             LogActivity("%s revived %s.", sActor, sRecipient);
+        }
+		
+		if (GetEntProp(subject, Prop_Send, "m_bIsOnThirdStrike")) {
+            g_bIsBlackAndWhite[subject] = true;
+            LogActivity("%s is now Black and White!", sRecipient);
         }
     }
 }
