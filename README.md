@@ -65,6 +65,11 @@ Steam's stats tracker is buggy. To satisfy my addiction to accurate lifetime and
 # Configuration
 An example of the config file at cfg/sourcemod/l4d2_stats_history.cfg
 ```
+// Display activity logs in the in-game chat HUD? (0=No, 1=Yes)
+// -
+// Default: "1"
+l4d2_stats_history_activity_chat "1"
+
 // Enable or disable writing activity logs to files? (0=No, 1=Yes)
 // -
 // Default: "1"
