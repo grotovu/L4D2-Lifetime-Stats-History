@@ -283,6 +283,9 @@ int g_iLastPinnedBy[MAXPLAYERS + 1];
 float g_fPinEndTime[MAXPLAYERS + 1];
 char g_sLastDamageSource[MAXPLAYERS + 1][64];
 
+int g_iLastBoomerPopper = 0;
+float g_fLastBoomerExplodeTime = 0.0;
+
 int g_iLastShover[MAXPLAYERS + 1];
 float g_fLastShoveTime[MAXPLAYERS + 1];
 
@@ -449,6 +452,7 @@ public void OnPluginStart()
 	HookEvent("bot_player_replace",   Event_PlayerReplacedBot);
 	
 	HookEvent("spitter_killed", 	  Event_SpitterKilled);
+	HookEvent("boomer_exploded", 	  Event_BoomerExploded);
 	
     HookEvent("tongue_grab",          Event_PinStart);
     HookEvent("lunge_pounce",         Event_PinStart);
@@ -2103,23 +2107,22 @@ void Event_WitchKilled(Event event, const char[] name, bool dontBroadcast) {
     if (IsSurvivor(attacker)) {
         ADD_STAT(attacker, killsWitch);
 
-        int weaponID = g_iClientActiveWeaponID[attacker];
-        if (weaponID != -1) {
-            UpdateWeaponStatID(attacker, weaponID, 3);
-            UpdateWeaponStatID(attacker, weaponID, 12);
-            
-            int tick = GetGameTickCount();
-            if (witch > 0 && witch < MAX_ENTITIES_TRACKED && g_iWitchFirstHitTick[witch] == tick) {
-                ADD_STAT(attacker, witchCrowns);
-                UpdateWeaponStatID(attacker, weaponID, 16);
-                
-                char sName[32];
-                GetPlayerNameSafe(attacker, sName, sizeof(sName));
-                LogActivity("%s crowned the Witch.", sName);
+		int weaponID = g_iClientActiveWeaponID[attacker];
+		if (weaponID != -1) {
+			UpdateWeaponStatID(attacker, weaponID, 3);
+			UpdateWeaponStatID(attacker, weaponID, 12);
+			
+			if (event.GetBool("oneshot")) {
+				ADD_STAT(attacker, witchCrowns);
+				UpdateWeaponStatID(attacker, weaponID, 16);
+				
+				char sName[32];
+				GetPlayerNameSafe(attacker, sName, sizeof(sName));
+				LogActivity("%s crowned the Witch.", sName);
 				LogWitchDamageBreakdown(witch);
-                return;
-            }
-        }
+				return;
+			}
+		}
         char sName[32];
         GetPlayerNameSafe(attacker, sName, sizeof(sName));
         LogActivity("%s killed the Witch.", sName);
@@ -2496,14 +2499,38 @@ void Event_WitchHarasserSet(Event event, const char[] name, bool dontBroadcast) 
     }
 }
 
-void Event_PlayerNowIt(Event event, const char[] name, bool dontBroadcast) {
+public void Event_PlayerNowIt(Event event, const char[] name, bool dontBroadcast) {
     int client = GetClientOfUserId(event.GetInt("userid"));
     if (IsSurvivor(client) && event.GetBool("by_boomer")) {
         ADD_STAT(client, timesBoomed);
         char sName[32];
         GetPlayerNameSafe(client, sName, sizeof(sName));
-        LogActivity("%s got boomed on by a Boomer.", sName);
+        
+        if (event.GetBool("exploded")) {
+            float curTime = GetGameTime();
+            int popper = g_iLastBoomerPopper;
+            
+            if (popper > 0 && popper <= MaxClients && IsClientInGame(popper) && GetClientTeam(popper) == TEAM_SURVIVOR && (curTime - g_fLastBoomerExplodeTime) < 0.1) {
+                char sPopperName[32];
+                GetPlayerNameSafe(popper, sPopperName, sizeof(sPopperName));
+                
+                if (popper == client) {
+                    LogActivity("%s popped a Boomer too close and biled themselves.", sName);
+                } else {
+                    LogActivity("%s was biled because %s popped a Boomer nearby!", sName, sPopperName);
+                }
+            } else {
+                LogActivity("%s was biled by an exploding Boomer.", sName);
+            }
+        } else {
+            LogActivity("%s was directly vomited on by a Boomer.", sName);
+        }
     }
+}
+
+public void Event_BoomerExploded(Event event, const char[] name, bool dontBroadcast) {
+    g_iLastBoomerPopper = GetClientOfUserId(event.GetInt("attacker"));
+    g_fLastBoomerExplodeTime = GetGameTime();
 }
 
 void Event_PlayerLedgeGrab(Event event, const char[] name, bool dontBroadcast) {
