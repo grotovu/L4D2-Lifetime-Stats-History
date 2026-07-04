@@ -281,10 +281,15 @@ bool g_bIsCommonEntity[MAX_ENTITIES_TRACKED];
 int g_iPinnedBy[MAXPLAYERS + 1];
 int g_iLastPinnedBy[MAXPLAYERS + 1];
 float g_fPinEndTime[MAXPLAYERS + 1];
+bool g_bPinResolutionLogged[MAXPLAYERS + 1] = { false, ... };
 char g_sLastDamageSource[MAXPLAYERS + 1][64];
+
+bool g_bTongueCutThisFrame[MAXPLAYERS + 1] = { false, ... };
 
 int g_iLastBoomerPopper = 0;
 float g_fLastBoomerExplodeTime = 0.0;
+
+bool g_bSpitterHasSpit[MAXPLAYERS + 1] = { false, ... };
 
 int g_iLastShover[MAXPLAYERS + 1];
 float g_fLastShoveTime[MAXPLAYERS + 1];
@@ -452,8 +457,8 @@ public void OnPluginStart()
 	HookEvent("player_bot_replace",   Event_BotReplacedPlayer);
 	HookEvent("bot_player_replace",   Event_PlayerReplacedBot);
 	
-	HookEvent("spitter_killed", 	  Event_SpitterKilled);
 	HookEvent("boomer_exploded", 	  Event_BoomerExploded);
+	HookEvent("ability_use",          Event_AbilityUse);
 	
     HookEvent("tongue_grab",          Event_PinStart);
     HookEvent("lunge_pounce",         Event_PinStart);
@@ -461,15 +466,12 @@ public void OnPluginStart()
     HookEvent("charger_pummel_start", Event_PinStart);
 
     HookEvent("tongue_release",       Event_PinStop);
-	HookEvent("tongue_pull_stopped",  Event_PinStop);
+	HookEvent("choke_stopped",        Event_PinStop);
+	
+    HookEvent("tongue_pull_stopped",  Event_PinStop);
     HookEvent("pounce_stopped",       Event_PinStop);
     HookEvent("jockey_ride_end",      Event_PinStop);
     HookEvent("charger_pummel_end",   Event_PinStop);
-	
-    HookEvent("tongue_pull_stopped",  Event_SaveFromPin);
-    HookEvent("pounce_stopped",       Event_SaveFromPin);
-    HookEvent("jockey_ride_end",      Event_SaveFromPin);
-    HookEvent("charger_pummel_end",   Event_SaveFromPin);
 
 	HookEvent("tongue_pull_stopped",  Event_TonguePullStopped);
 	HookEvent("player_shoved",        Event_PlayerShoved);
@@ -480,6 +482,10 @@ public void OnPluginStart()
 	HookEvent("witch_harasser_set",   Event_WitchHarasserSet);
 	HookEvent("player_now_it",        Event_PlayerNowIt);
 	HookEvent("player_ledge_grab",    Event_PlayerLedgeGrab);
+	
+	HookEvent("strongman_bell_knocked_off", Event_StrongmanBellKnockedOff);
+    HookEvent("stashwhacker_game_won",      Event_StashwhackerGameWon);
+    HookEvent("punched_clown",              Event_PunchedClown);
 	
 	HookEvent("triggered_car_alarm", Event_TriggeredCarAlarm);
 	
@@ -830,6 +836,10 @@ public void OnClientPostAdminCheck(int client)
 	g_iLastDeathTick[client] = -1;
 	g_sLastDeathWeapon[client][0] = '\0';
 	g_sLastCleanWeapon[client][0] = '\0';
+	
+	g_bTongueCutThisFrame[client] = false;
+	g_bPinResolutionLogged[client] = false;
+	g_bSpitterHasSpit[client] = false;
 
 	UpdateClientCacheDelayed(client);
 
@@ -889,6 +899,9 @@ public void OnClientDisconnect(int client)
 	g_iPendingSkeetAttacker[client] = 0;
 	g_bIsPressingButton[client] = false;
 	g_bIsBlackAndWhite[client] = false;
+	g_bTongueCutThisFrame[client] = false;
+	g_bPinResolutionLogged[client] = false;
+	g_bSpitterHasSpit[client] = false;
 	
 	FlushKillsCache(client);
 	
@@ -1329,8 +1342,26 @@ public void OnGameFrame()
         {
             if (!IsReallyPinnedBy(i, g_iPinnedBy[i]))
             {
+                int attacker = g_iPinnedBy[i];
+                
                 g_iPinnedBy[i] = 0;
                 g_fPinEndTime[i] = curTime;
+
+                int rescuer = 0;
+                if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && g_iLastShover[attacker] > 0 && IsClientInGame(g_iLastShover[attacker]))
+                {
+                    if ((curTime - g_fLastShoveTime[attacker]) < 0.8)
+                    {
+                        rescuer = g_iLastShover[attacker];
+                    }
+                }
+
+                DataPack pack;
+                CreateDataTimer(0.1, Timer_ResolvePinStop, pack, TIMER_FLAG_NO_MAPCHANGE);
+                pack.WriteCell(GetClientUserId(i));
+                pack.WriteCell(attacker > 0 ? GetClientUserId(attacker) : 0);
+                pack.WriteCell(rescuer > 0 ? GetClientUserId(rescuer) : 0);
+                pack.WriteString("programmatic_break");
             }
         }
     }
@@ -1376,16 +1407,22 @@ void Event_FinaleWin(Event event, const char[] name, bool dontBroadcast) {
     rescuedRoster[0] = '\0';
     deceasedRoster[0] = '\0';
 
+    bool bGnomeRescued = false;
+
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR) {
             char sName[32];
             GetPlayerNameSafe(i, sName, sizeof(sName));
             
-            if (IsPlayerAlive(i)) {
+            if (IsPlayerEscaped(i)) {
                 if (rescuedRoster[0] == '\0') {
                     strcopy(rescuedRoster, sizeof(rescuedRoster), sName);
                 } else {
                     Format(rescuedRoster, sizeof(rescuedRoster), "%s, %s", rescuedRoster, sName);
+                }
+                
+                if (IsCarryingGnome(i)) {
+                    bGnomeRescued = true;
                 }
             } else {
                 if (deceasedRoster[0] == '\0') {
@@ -1403,6 +1440,9 @@ void Event_FinaleWin(Event event, const char[] name, bool dontBroadcast) {
     if (deceasedRoster[0] != '\0') {
         LogActivity("Deceased / Left for Dead: %s", deceasedRoster);
     }
+    if (bGnomeRescued) {
+        LogActivity("The Gnome was successfully rescued!");
+    }
 
     WriteActivityLog();
 
@@ -1417,18 +1457,106 @@ void Event_FinaleWin(Event event, const char[] name, bool dontBroadcast) {
                 }
             }
 
-            ADD_STAT(i, campaignsWon);
-            
-            if (!IsFakeClient(i) && !g_bHasWonCampaign[i]) {
-                g_bHasWonCampaign[i] = true;
-                if (g_cvPrintMode.IntValue >= 1) {
-                    GeneratePrintFile(i, true);
-                    GenerateCampaignPrintFile(i);
+            if (IsPlayerEscaped(i)) {
+                ADD_STAT(i, campaignsWon);
+                
+                if (!IsFakeClient(i) && !g_bHasWonCampaign[i]) {
+                    g_bHasWonCampaign[i] = true;
+                    if (g_cvPrintMode.IntValue >= 1) {
+                        GeneratePrintFile(i, true);
+                        GenerateCampaignPrintFile(i);
+                    }
                 }
             }
         }
     }
     SaveAndWriteAllStats();
+}
+
+bool IsPlayerInRescueArea(int client)
+{
+    float pos[3];
+    GetClientAbsOrigin(client, pos);
+
+    int trigger = -1;
+    bool foundTrigger = false;
+    
+    while ((trigger = FindEntityByClassname(trigger, "trigger_escape")) != -1)
+    {
+        foundTrigger = true;
+        
+        float mins[3], maxs[3], origin[3];
+        GetEntPropVector(trigger, Prop_Send, "m_Collision.m_vecMins", mins);
+        GetEntPropVector(trigger, Prop_Send, "m_Collision.m_vecMaxs", maxs);
+        GetEntPropVector(trigger, Prop_Send, "m_vecOrigin", origin);
+
+        float absMins[3], absMaxs[3];
+        absMins[0] = mins[0] + origin[0];
+        absMins[1] = mins[1] + origin[1];
+        absMins[2] = mins[2] + origin[2];
+        
+        absMaxs[0] = maxs[0] + origin[0];
+        absMaxs[1] = maxs[1] + origin[1];
+        absMaxs[2] = maxs[2] + origin[2];
+
+        if (pos[0] >= absMins[0] && pos[0] <= absMaxs[0] &&
+            pos[1] >= absMins[1] && pos[1] <= absMaxs[1] &&
+            pos[2] >= absMins[2] && pos[2] <= absMaxs[2])
+        {
+            return true;
+        }
+    }
+    
+    return !foundTrigger;
+}
+
+bool IsPlayerEscaped(int client)
+{
+    if (!IsClientInGame(client) || GetClientTeam(client) != TEAM_SURVIVOR || !IsPlayerAlive(client))
+    {
+        return false;
+    }
+    
+    if (GetEntProp(client, Prop_Send, "m_isIncapacitated") || GetEntProp(client, Prop_Send, "m_isHangingFromLedge"))
+    {
+        return false;
+    }
+    
+    return IsPlayerInRescueArea(client);
+}
+
+bool IsCarryingGnome(int client)
+{
+    if (!IsClientInGame(client) || GetClientTeam(client) != TEAM_SURVIVOR || !IsPlayerAlive(client))
+    {
+        return false;
+    }
+    
+    int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+    if (activeWeapon > 0 && IsValidEntity(activeWeapon))
+    {
+        char classname[64];
+        GetEntityClassname(activeWeapon, classname, sizeof(classname));
+        if (strcmp(classname, "weapon_gnome") == 0)
+        {
+            return true;
+        }
+    }
+    
+    for (int i = 0; i < 56; i++)
+    {
+        int weapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
+        if (weapon > 0 && IsValidEntity(weapon))
+        {
+            char classname[64];
+            GetEntityClassname(weapon, classname, sizeof(classname));
+            if (strcmp(classname, "weapon_gnome") == 0)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void Event_MapTransition(Event event, const char[] name, bool dontBroadcast) {
@@ -1573,16 +1701,28 @@ void Event_WeaponFire(Event event, const char[] name, bool dontBroadcast) {
         case 'm': {
             if (strcmp(weapon[idx], "molotov") == 0) {
                 ADD_STAT(client, molotovsThrown);
+				
+				char sPlayerName[32];
+                GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+                LogActivity("%s threw a Molotov.", sPlayerName);
             }
         }
         case 'p': {
             if (strcmp(weapon[idx], "pipe_bomb") == 0) {
                 ADD_STAT(client, pipesThrown);
+				
+				char sPlayerName[32];
+                GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+                LogActivity("%s threw a Pipe-Bomb.", sPlayerName);
             }
         }
         case 'v': {
             if (strcmp(weapon[idx], "vomitjar") == 0) {
                 ADD_STAT(client, bilesThrown);
+				
+				char sPlayerName[32];
+                GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+                LogActivity("%s threw a Vomit Jar.", sPlayerName);
             }
         }
     }
@@ -1794,7 +1934,11 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                         default: strcopy(sInfected, sizeof(sInfected), "Infected");
                     }
                     
-                    LogActivity("%s saved %s by killing the %s with %s.", sRescuer, sVictim, sInfected, prettyWPN);
+                    if (event.GetBool("headshot")) {
+                        LogActivity("%s saved %s by killing the %s with %s (Headshot).", sRescuer, sVictim, sInfected, prettyWPN);
+                    } else {
+                        LogActivity("%s saved %s by killing the %s with %s.", sRescuer, sVictim, sInfected, prettyWPN);
+                    }
                     
                     bIsSpecialFeat = true;
                     
@@ -1842,22 +1986,51 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
         bIsSpecialFeat = true;
     }
 
-    if (zombieClass >= 1 && zombieClass <= 6 && zombieClass != 4) {
+    if (zombieClass >= 1 && zombieClass <= 6) {
         if (!bIsSpecialFeat) {
             char sAttacker[32], sVictim[32], prettyWPN[64], sInfected[16];
             GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
             GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
             GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
 
-            switch (zombieClass) {
-                case 1: strcopy(sInfected, sizeof(sInfected), "Smoker");
-                case 2: strcopy(sInfected, sizeof(sInfected), "Boomer");
-                case 3: strcopy(sInfected, sizeof(sInfected), "Hunter");
-                case 5: strcopy(sInfected, sizeof(sInfected), "Jockey");
-                case 6: strcopy(sInfected, sizeof(sInfected), "Charger");
-            }
+            bool isHeadshot = event.GetBool("headshot");
 
-            LogActivity("%s killed %s (%s) with %s.", sAttacker, sVictim, sInfected, prettyWPN);
+            if (zombieClass == 4) {
+                bool hasSpit = g_bSpitterHasSpit[victim];
+                g_bSpitterHasSpit[victim] = false;
+
+                if (!hasSpit) {
+                    ADD_STAT(attacker, spitterKilledPreSpat);
+                    UpdateWeaponStat(attacker, clean, 20);
+                    
+                    if (isHeadshot) {
+                        LogActivity("%s killed a Spitter before she could spit with %s (Headshot).", sAttacker, prettyWPN);
+                    } else {
+                        LogActivity("%s killed a Spitter before she could spit with %s.", sAttacker, prettyWPN);
+                    }
+                } else {
+                    if (isHeadshot) {
+                        LogActivity("%s killed %s (Spitter) with %s (Headshot).", sAttacker, sVictim, prettyWPN);
+                    } else {
+                        LogActivity("%s killed %s (Spitter) with %s.", sAttacker, sVictim, prettyWPN);
+                    }
+                }
+            }
+			else {
+                switch (zombieClass) {
+                    case 1: strcopy(sInfected, sizeof(sInfected), "Smoker");
+                    case 2: strcopy(sInfected, sizeof(sInfected), "Boomer");
+                    case 3: strcopy(sInfected, sizeof(sInfected), "Hunter");
+                    case 5: strcopy(sInfected, sizeof(sInfected), "Jockey");
+                    case 6: strcopy(sInfected, sizeof(sInfected), "Charger");
+                }
+
+                if (isHeadshot) {
+                    LogActivity("%s killed %s (%s) with %s (Headshot).", sAttacker, sVictim, sInfected, prettyWPN);
+                } else {
+                    LogActivity("%s killed %s (%s) with %s.", sAttacker, sVictim, sInfected, prettyWPN);
+                }
+            }
         }
     }
 	
@@ -2022,50 +2195,6 @@ void Event_InfectedHurt(Event event, const char[] name, bool dontBroadcast)
                 g_iLastHitTick[attacker] = tick;
             }
         }
-    }
-}
-
-void Event_SpitterKilled(Event event, const char[] name, bool dontBroadcast)
-{
-    if (!g_cvEnable.BoolValue) return;
-
-    int attacker = GetClientOfUserId(event.GetInt("attacker"));
-    int victim = GetClientOfUserId(event.GetInt("userid"));
-
-    if (attacker <= 0 || attacker > MaxClients || !IsClientInGame(attacker) || GetClientTeam(attacker) != TEAM_SURVIVOR) return;
-    if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim)) return;
-
-    bool hasSpit = false;
-    int ability = GetEntPropEnt(victim, Prop_Send, "m_customAbility");
-    if (ability > 0 && IsValidEntity(ability))
-    {
-        hasSpit = view_as<bool>(GetEntProp(ability, Prop_Send, "m_hasBeenUsed"));
-    }
-
-    char clean[64];
-    int wEnt = GetEntPropEnt(attacker, Prop_Send, "m_hActiveWeapon");
-    if (wEnt > 0 && IsValidEntity(wEnt)) {
-        char cls[64]; 
-        GetEntityClassname(wEnt, cls, sizeof(cls));
-        GetCleanWeaponName(attacker, cls, clean, sizeof(clean), wEnt);
-    } else {
-        clean[0] = '\0';
-    }
-
-    char sAttacker[32], sVictim[32], prettyWPN[64];
-    GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
-    GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
-    GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-
-    if (!hasSpit)
-    {
-        ADD_STAT(attacker, spitterKilledPreSpat);
-        UpdateWeaponStat(attacker, clean, 20);
-        LogActivity("%s killed a Spitter before she could spit with %s.", sAttacker, prettyWPN);
-    }
-    else
-    {
-        LogActivity("%s killed %s (Spitter) with %s.", sAttacker, sVictim, prettyWPN);
     }
 }
 
@@ -2471,22 +2600,39 @@ void Event_TankRockKilled(Event event, const char[] name, bool dontBroadcast)
     }
 }
 
+public Action Timer_ResetTongueCut(Handle timer, any userid)
+{
+    int client = GetClientOfUserId(userid);
+    if (client > 0)
+    {
+        g_bTongueCutThisFrame[client] = false;
+    }
+    return Plugin_Stop;
+}
+
 void Event_TonguePullStopped(Event event, const char[] name, bool dontBroadcast) {
-    int victim = GetClientOfUserId(event.GetInt("userid"));
-    
+    int victim = GetClientOfUserId(event.GetInt("victim")); 
+    int cleanser = GetClientOfUserId(event.GetInt("userid")); 
+
     if (IsSurvivor(victim)) {
-        int weaponID = g_iClientActiveWeaponID[victim];
-        if (weaponID != -1) {
-            char clean[64];
-            strcopy(clean, sizeof(clean), g_sCleanWeaponNames[weaponID]);
-            if (IsMelee(clean)) {
-                ADD_STAT(victim, tongueCuts);
-                UpdateWeaponStatID(victim, weaponID, 17);
-				
-				char sVictim[32], prettyWPN[64];
-                GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
-                GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-                LogActivity("%s cut a Smoker's tongue with %s.", sVictim, prettyWPN);
+        if (cleanser == victim) {
+            int weaponID = g_iClientActiveWeaponID[victim];
+            if (weaponID != -1) {
+                char clean[64];
+                strcopy(clean, sizeof(clean), g_sCleanWeaponNames[weaponID]);
+                if (IsMelee(clean)) {
+                    g_bTongueCutThisFrame[victim] = true;
+                    
+                    CreateTimer(0.2, Timer_ResetTongueCut, GetClientUserId(victim), TIMER_FLAG_NO_MAPCHANGE);
+                    
+                    ADD_STAT(victim, tongueCuts);
+                    UpdateWeaponStatID(victim, weaponID, 17);
+                    
+                    char sVictim[32], prettyWPN[64];
+                    GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
+                    GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
+                    LogActivity("%s cut a Smoker's tongue with %s.", sVictim, prettyWPN);
+                }
             }
         }
     }
@@ -2534,6 +2680,20 @@ public void Event_PlayerNowIt(Event event, const char[] name, bool dontBroadcast
 public void Event_BoomerExploded(Event event, const char[] name, bool dontBroadcast) {
     g_iLastBoomerPopper = GetClientOfUserId(event.GetInt("attacker"));
     g_fLastBoomerExplodeTime = GetGameTime();
+}
+
+public void Event_AbilityUse(Event event, const char[] name, bool dontBroadcast)
+{
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client > 0 && client <= MaxClients && IsClientInGame(client))
+    {
+        char sAbility[32];
+        event.GetString("ability", sAbility, sizeof(sAbility));
+        if (strcmp(sAbility, "ability_spit") == 0)
+        {
+            g_bSpitterHasSpit[client] = true;
+        }
+    }
 }
 
 void Event_PlayerLedgeGrab(Event event, const char[] name, bool dontBroadcast) {
@@ -2716,55 +2876,6 @@ void Event_AwardEarned(Event event, const char[] name, bool dontBroadcast) {
     }
 }
 
-void Event_SaveFromPin(Event event, const char[] name, bool dontBroadcast)
-{
-    int victim, attacker, rescuer;
-    GetPinEventPlayers(event, name, victim, attacker, rescuer);
-    
-    char sInfected[16];
-    if (StrContains(name, "tongue") != -1) strcopy(sInfected, sizeof(sInfected), "Smoker");
-    else if (StrContains(name, "pounce") != -1) strcopy(sInfected, sizeof(sInfected), "Hunter");
-    else if (StrContains(name, "jockey") != -1) strcopy(sInfected, sizeof(sInfected), "Jockey");
-    else if (StrContains(name, "charger") != -1) strcopy(sInfected, sizeof(sInfected), "Charger");
-    
-    if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR)
-    {
-        if (g_iPinnedBy[victim] > 0)
-        {
-            if (rescuer <= 0 || !IsClientInGame(rescuer))
-            {
-                float curTime = GetGameTime();
-                if (attacker > 0 && g_iLastShover[attacker] > 0 && IsClientInGame(g_iLastShover[attacker]))
-                {
-                    if ((curTime - g_fLastShoveTime[attacker]) < 0.5)
-                    {
-                        rescuer = g_iLastShover[attacker];
-                    }
-                }
-            }
-
-            if (rescuer > 0 && rescuer <= MaxClients && IsClientInGame(rescuer) && GetClientTeam(rescuer) == TEAM_SURVIVOR && rescuer != victim)
-            {
-                if (attacker > 0 && IsClientInGame(attacker) && IsPlayerAlive(attacker) && GetClientHealth(attacker) > 0)
-                {
-                    ADD_STAT(victim, protectedByTeammate);
-
-                    if (!IsFakeClient(victim))
-                    {
-                        if (g_Campaign[victim].protectedByTeammate > g_Lifetime[victim].protectedByTeammateRecord)
-                            g_Lifetime[victim].protectedByTeammateRecord = g_Campaign[victim].protectedByTeammate;
-                    }
-
-                    char sVictim[32], sRescuer[32];
-                    GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
-                    GetPlayerNameSafe(rescuer, sRescuer, sizeof(sRescuer));
-                    LogActivity("%s saved %s from a %s.", sRescuer, sVictim, sInfected);
-                }
-            }
-        }
-    }
-}
-
 void Event_PinStart(Event event, const char[] name, bool dontBroadcast)
 {
     int victim = GetClientOfUserId(event.GetInt("victim"));
@@ -2784,6 +2895,8 @@ void Event_PinStart(Event event, const char[] name, bool dontBroadcast)
         else if (StrEqual(name, "charger_pummel_start")) strcopy(sInfected, sizeof(sInfected), "Charger");
         else return;
 
+		g_bPinResolutionLogged[victim] = false;
+		
         LogActivity("%s got pinned by a %s.", sVictim, sInfected);
     }
 }
@@ -2793,36 +2906,111 @@ void Event_PinStop(Event event, const char[] name, bool dontBroadcast)
     int victim, attacker, rescuer;
     GetPinEventPlayers(event, name, victim, attacker, rescuer);
 
-    if (victim > 0 && victim <= MaxClients)
-    {
-        if (g_iPinnedBy[victim] > 0)
-        {
-            bool isTongueCut = false;
-            if (StrEqual(name, "tongue_pull_stopped"))
-            {
-                int weaponID = g_iClientActiveWeaponID[victim];
-                if (weaponID != -1 && IsMelee(g_sCleanWeaponNames[weaponID]))
-                {
-                    isTongueCut = true;
-                }
-            }
+    if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim)) return;
 
-            if (!isTongueCut && attacker > 0 && IsClientInGame(attacker) && IsPlayerAlive(attacker) && GetClientHealth(attacker) > 0 && (rescuer <= 0 || !IsClientInGame(rescuer)))
+    int originalAttacker = g_iPinnedBy[victim];
+    if (originalAttacker <= 0) return;
+
+    if (attacker <= 0 || !IsClientInGame(attacker)) {
+        attacker = originalAttacker;
+    }
+
+    bool isTongueCut = false;
+    if (StrEqual(name, "tongue_pull_stopped"))
+    {
+        int weaponID = g_iClientActiveWeaponID[victim];
+        if (weaponID != -1 && IsMelee(g_sCleanWeaponNames[weaponID]))
+        {
+            isTongueCut = true;
+        }
+    }
+
+    g_iPinnedBy[victim] = 0;
+    g_fPinEndTime[victim] = GetGameTime();
+
+    if (isTongueCut) return;
+
+    DataPack pack;
+    CreateDataTimer(0.1, Timer_ResolvePinStop, pack, TIMER_FLAG_NO_MAPCHANGE);
+    pack.WriteCell(GetClientUserId(victim));
+    pack.WriteCell(attacker > 0 ? GetClientUserId(attacker) : 0);
+    pack.WriteCell(rescuer > 0 ? GetClientUserId(rescuer) : 0);
+    pack.WriteString(name);
+}
+
+public Action Timer_ResolvePinStop(Handle timer, DataPack pack)
+{
+    pack.Reset();
+    int victim = GetClientOfUserId(pack.ReadCell());
+    int attacker = GetClientOfUserId(pack.ReadCell());
+    int rescuer = GetClientOfUserId(pack.ReadCell());
+    char eventName[64];
+    pack.ReadString(eventName, sizeof(eventName));
+
+    if (victim <= 0 || !IsClientInGame(victim)) return Plugin_Stop;
+
+    if (g_bTongueCutThisFrame[victim]) {
+        g_bTongueCutThisFrame[victim] = false;
+        return Plugin_Stop;
+    }
+
+    if (attacker <= 0 || !IsClientInGame(attacker) || !IsPlayerAlive(attacker) || GetClientHealth(attacker) <= 0)
+    {
+        return Plugin_Stop;
+    }
+
+    if (rescuer <= 0 || !IsClientInGame(rescuer))
+    {
+        float pinEndTime = g_fPinEndTime[victim];
+        if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && g_iLastShover[attacker] > 0 && IsClientInGame(g_iLastShover[attacker]))
+        {
+            float diff = g_fLastShoveTime[attacker] - pinEndTime;
+            if (diff >= -0.2 && diff < 0.8)
             {
-                char sVictim[32], sInfected[16];
-                GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
-                if (StrContains(name, "tongue") != -1) strcopy(sInfected, sizeof(sInfected), "Smoker");
-                else if (StrContains(name, "pounce") != -1) strcopy(sInfected, sizeof(sInfected), "Hunter");
-                else if (StrContains(name, "jockey") != -1) strcopy(sInfected, sizeof(sInfected), "Jockey");
-                else if (StrContains(name, "charger") != -1) strcopy(sInfected, sizeof(sInfected), "Charger");
-                
-                LogActivity("%s became free from the %s.", sVictim, sInfected);
+                rescuer = g_iLastShover[attacker];
             }
         }
-
-        g_iPinnedBy[victim] = 0;
-        g_fPinEndTime[victim] = GetGameTime();
     }
+
+    int zombieClass = 0;
+    if (attacker > 0 && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_INFECTED) {
+        zombieClass = GetEntProp(attacker, Prop_Send, "m_zombieClass");
+    }
+
+    char sInfected[16];
+    if (zombieClass == 1 || StrContains(eventName, "tongue") != -1 || StrContains(eventName, "choke") != -1) strcopy(sInfected, sizeof(sInfected), "Smoker");
+    else if (zombieClass == 3 || StrContains(eventName, "pounce") != -1) strcopy(sInfected, sizeof(sInfected), "Hunter");
+    else if (zombieClass == 5 || StrContains(eventName, "jockey") != -1) strcopy(sInfected, sizeof(sInfected), "Jockey");
+    else if (zombieClass == 6 || StrContains(eventName, "charger") != -1) strcopy(sInfected, sizeof(sInfected), "Charger");
+    else strcopy(sInfected, sizeof(sInfected), "Infected");
+
+    char sVictim[32];
+    GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
+
+    if (rescuer > 0 && rescuer <= MaxClients && IsClientInGame(rescuer) && GetClientTeam(rescuer) == TEAM_SURVIVOR && rescuer != victim)
+    {
+        ADD_STAT(victim, protectedByTeammate);
+
+        if (!IsFakeClient(victim))
+        {
+            if (g_Campaign[victim].protectedByTeammate > g_Lifetime[victim].protectedByTeammateRecord)
+                g_Lifetime[victim].protectedByTeammateRecord = g_Campaign[victim].protectedByTeammate;
+        }
+
+        char sRescuer[32];
+        GetPlayerNameSafe(rescuer, sRescuer, sizeof(sRescuer));
+        LogActivity("%s saved %s from a %s.", sRescuer, sVictim, sInfected);
+        
+        g_bPinResolutionLogged[victim] = true;
+    }
+    else
+    {
+        LogActivity("%s became free from the %s.", sVictim, sInfected);
+        
+        g_bPinResolutionLogged[victim] = true;
+    }
+
+    return Plugin_Stop;
 }
 
 void Event_TriggeredCarAlarm(Event event, const char[] name, bool dontBroadcast)
@@ -2837,6 +3025,66 @@ void Event_TriggeredCarAlarm(Event event, const char[] name, bool dontBroadcast)
         char sName[32];
         GetPlayerNameSafe(client, sName, sizeof(sName));
         LogActivity("%s triggered the car alarm!", sName);
+    }
+}
+
+public void Event_StrongmanBellKnockedOff(Event event, const char[] name, bool dontBroadcast)
+{
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client > 0 && IsClientInGame(client))
+    {
+        char sName[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        LogActivity("%s rang the Strongman strength-test bell!", sName);
+    }
+}
+
+public void Event_PunchedClown(Event event, const char[] name, bool dontBroadcast)
+{
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client > 0 && IsClientInGame(client))
+    {
+        char sName[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        LogActivity("%s punched a clown!", sName);
+    }
+}
+
+public void Event_StashwhackerGameWon(Event event, const char[] name, bool dontBroadcast)
+{
+    int closest = -1;
+    int proxy = event.GetInt("subject");
+    if (proxy > 0 && IsValidEntity(proxy))
+    {
+        float proxyPos[3];
+        GetEntPropVector(proxy, Prop_Send, "m_vecOrigin", proxyPos);
+        
+        float minDistance = 999999.0;
+        for (int i = 1; i <= MaxClients; i++)
+        {
+            if (IsValidSurvivor(i) && IsPlayerAlive(i))
+            {
+                float plyPos[3];
+                GetClientAbsOrigin(i, plyPos);
+                float dist = GetVectorDistance(plyPos, proxyPos);
+                if (dist < minDistance)
+                {
+                    minDistance = dist;
+                    closest = i;
+                }
+            }
+        }
+    }
+    
+    if (closest > 0)
+    {
+        char sName[32];
+        GetPlayerNameSafe(closest, sName, sizeof(sName));
+        LogActivity("%s won a game of Stashwhacker!", sName);
+    }
+    else
+    {
+        LogActivity("The Stashwhacker game was won!");
     }
 }
 
@@ -3085,10 +3333,13 @@ int GetPinnedVictim(int infected)
     {
         if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR && IsPlayerAlive(i))
         {
-            if (g_iPinnedBy[i] == infected || (g_iLastPinnedBy[i] == infected && (currentTime - g_fPinEndTime[i]) < 1.0))
+            if (!g_bPinResolutionLogged[i])
             {
-                g_iLastPinnedBy[i] = 0;
-                return i;
+                if (g_iPinnedBy[i] == infected || (g_iLastPinnedBy[i] == infected && (currentTime - g_fPinEndTime[i]) < 1.0))
+                {
+                    g_iLastPinnedBy[i] = 0;
+                    return i;
+                }
             }
         }
     }
@@ -3110,13 +3361,18 @@ void GetPinEventPlayers(Event event, const char[] name, int &victim, int &attack
     {
         victim = GetClientOfUserId(event.GetInt("victim"));
         attacker = GetClientOfUserId(event.GetInt("smoker"));
-        rescuer = GetClientOfUserId(event.GetInt("cleanser"));
+        rescuer = GetClientOfUserId(event.GetInt("userid"));
+    }
+	else if (StrEqual(name, "choke_stopped"))
+    {
+        victim = GetClientOfUserId(event.GetInt("victim"));
+        attacker = GetClientOfUserId(event.GetInt("smoker"));
+        rescuer = GetClientOfUserId(event.GetInt("userid"));
     }
     else if (StrEqual(name, "pounce_stopped"))
     {
-        victim = GetClientOfUserId(event.GetInt("userid"));
-        attacker = GetClientOfUserId(event.GetInt("hunter"));
-        rescuer = GetClientOfUserId(event.GetInt("cleanser"));
+        victim = GetClientOfUserId(event.GetInt("victim"));
+        rescuer = GetClientOfUserId(event.GetInt("userid"));
     }
     else if (StrEqual(name, "jockey_ride_end"))
     {
@@ -3126,9 +3382,9 @@ void GetPinEventPlayers(Event event, const char[] name, int &victim, int &attack
     }
     else if (StrEqual(name, "charger_pummel_end"))
     {
-        rescuer = GetClientOfUserId(event.GetInt("rescuer"));
-        attacker = GetClientOfUserId(event.GetInt("attacker"));
+        attacker = GetClientOfUserId(event.GetInt("userid"));
         victim = GetClientOfUserId(event.GetInt("victim"));
+        rescuer = GetClientOfUserId(event.GetInt("rescuer"));
     }
 }
 
@@ -3395,9 +3651,13 @@ void UpdateBotNamesCache()
 bool IsReallyPinnedBy(int survivor, int infected)
 {
     if (GetEntPropEnt(survivor, Prop_Send, "m_tongueOwner") == infected) return true;
+    
+    if (GetEntPropEnt(infected, Prop_Send, "m_tongueVictim") == survivor) return true;
+    
     if (GetEntPropEnt(survivor, Prop_Send, "m_pounceAttacker") == infected) return true;
     if (GetEntPropEnt(survivor, Prop_Send, "m_jockeyAttacker") == infected) return true;
     if (GetEntPropEnt(survivor, Prop_Send, "m_pummelAttacker") == infected) return true;
+    
     return false;
 }
 
