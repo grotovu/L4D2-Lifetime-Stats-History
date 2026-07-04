@@ -2532,6 +2532,8 @@ void ProcessDamageLog(int victim, int damage, const char[] source, int preHealth
     if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim) || damage <= 0) return;
 
     int sourceID = GetDamageSourceID(source);
+	
+	if (sourceID == DMG_SOURCE_INCAP_DECAY || sourceID == DMG_SOURCE_WORLD) return;
 
     if (sourceID == DMG_SOURCE_FF && attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
     {
@@ -3047,22 +3049,24 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
     bool isLedgePullUp = event.GetBool("ledge_hang");
     
     if (client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR) {
-        ADD_STAT(client, revivesTotal);
-        
-        if (isLedgePullUp) {
-            ADD_STAT(client, ledgeRescues);
-        }
-		
-        if (!IsFakeClient(client)) {
-            if (g_Campaign[client].revivesTotal > g_Lifetime[client].revivesRecord) 
-                g_Lifetime[client].revivesRecord = g_Campaign[client].revivesTotal;
+        if (client != subject) {
+            ADD_STAT(client, revivesTotal);
+            
+            if (isLedgePullUp) {
+                ADD_STAT(client, ledgeRescues);
+            }
+            
+            if (!IsFakeClient(client)) {
+                if (g_Campaign[client].revivesTotal > g_Lifetime[client].revivesRecord) 
+                    g_Lifetime[client].revivesRecord = g_Campaign[client].revivesTotal;
+            }
         }
     }
     
     if (subject > 0 && subject <= MaxClients && IsClientInGame(subject) && GetClientTeam(subject) == TEAM_SURVIVOR) {
         if (client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR && client != subject) {
             ADD_STAT(subject, revivedByTeammate);
-			
+            
             if (!IsFakeClient(subject)) {
                 if (g_Campaign[subject].revivedByTeammate > g_Lifetime[subject].revivedByTeammateRecord) {
                     g_Lifetime[subject].revivedByTeammateRecord = g_Campaign[subject].revivedByTeammate;
@@ -3075,15 +3079,20 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
         char sActor[32], sRecipient[32];
         GetPlayerNameSafe(client, sActor, sizeof(sActor));
         GetPlayerNameSafe(subject, sRecipient, sizeof(sRecipient));
-        if (isLedgePullUp) {
-            LogActivity("%s pulled %s back up from a ledge.", sActor, sRecipient);
+        
+        if (client == subject) {
+            LogActivity("%s got up on their own.", sRecipient);
         } else {
-            LogActivity("%s revived %s.", sActor, sRecipient);
+            if (isLedgePullUp) {
+                LogActivity("%s pulled %s back up from a ledge.", sActor, sRecipient);
+            } else {
+                LogActivity("%s revived %s.", sActor, sRecipient);
+            }
         }
-		
-		g_iPreDamageHealth[subject] = GetSurvivorTotalHealth(subject);
-		
-		if (GetEntProp(subject, Prop_Send, "m_bIsOnThirdStrike")) {
+        
+        g_iPreDamageHealth[subject] = GetSurvivorTotalHealth(subject);
+        
+        if (GetEntProp(subject, Prop_Send, "m_bIsOnThirdStrike")) {
             g_bIsBlackAndWhite[subject] = true;
             LogActivity("%s is now Black and White!", sRecipient);
         }
@@ -3732,7 +3741,7 @@ void GetPrettySourceName(const char[] source, char[] buffer, int maxlen) {
     else if (StrEqual(source, "env_fire")) strcopy(buffer, maxlen, "Environmental Fire");
     else if (StrEqual(source, "map_hazard")) strcopy(buffer, maxlen, "Map Hazards (trigger_hurt)");
     else if (StrEqual(source, "self_damage")) strcopy(buffer, maxlen, "Self Inflicted Damage");
-	else if (StrEqual(source, "incap_decay")) strcopy(buffer, maxlen, "Incapacitation Bleed-out");
+	else if (StrEqual(source, "incap_decay")) strcopy(buffer, maxlen, "Incapacitation / Bleed-out");
     else if (StrEqual(source, "world_damage")) strcopy(buffer, maxlen, "World / Physics Impact");
     else {
         strcopy(buffer, maxlen, source);
