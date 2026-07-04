@@ -285,11 +285,13 @@ bool g_bPinResolutionLogged[MAXPLAYERS + 1] = { false, ... };
 char g_sLastDamageSource[MAXPLAYERS + 1][64];
 
 bool g_bTongueCutThisFrame[MAXPLAYERS + 1] = { false, ... };
+float g_fCarryEndTime[MAXPLAYERS + 1] = { 0.0, ... };
 
 int g_iLastBoomerPopper = 0;
 float g_fLastBoomerExplodeTime = 0.0;
 
 bool g_bSpitterHasSpit[MAXPLAYERS + 1] = { false, ... };
+float g_fLastSpitEntryTime[MAXPLAYERS + 1] = { 0.0, ... };
 
 int g_iLastShover[MAXPLAYERS + 1];
 float g_fLastShoveTime[MAXPLAYERS + 1];
@@ -463,6 +465,7 @@ public void OnPluginStart()
     HookEvent("tongue_grab",          Event_PinStart);
     HookEvent("lunge_pounce",         Event_PinStart);
     HookEvent("jockey_ride",          Event_PinStart);
+	HookEvent("charger_carry_start",  Event_PinStart);
     HookEvent("charger_pummel_start", Event_PinStart);
 
     HookEvent("tongue_release",       Event_PinStop);
@@ -471,7 +474,11 @@ public void OnPluginStart()
     HookEvent("tongue_pull_stopped",  Event_PinStop);
     HookEvent("pounce_stopped",       Event_PinStop);
     HookEvent("jockey_ride_end",      Event_PinStop);
+	HookEvent("charger_carry_end",    Event_PinStop);
     HookEvent("charger_pummel_end",   Event_PinStop);
+	
+	HookEvent("charger_impact", 	  Event_ChargerImpact);
+	HookEvent("entered_spit", 		  Event_EnteredSpit);
 
 	HookEvent("tongue_pull_stopped",  Event_TonguePullStopped);
 	HookEvent("player_shoved",        Event_PlayerShoved);
@@ -836,6 +843,9 @@ public void OnClientPostAdminCheck(int client)
 	g_iLastDeathTick[client] = -1;
 	g_sLastDeathWeapon[client][0] = '\0';
 	g_sLastCleanWeapon[client][0] = '\0';
+	
+	g_fCarryEndTime[client] = 0.0;
+	g_fLastSpitEntryTime[client] = 0.0;
 	
 	g_bTongueCutThisFrame[client] = false;
 	g_bPinResolutionLogged[client] = false;
@@ -1384,6 +1394,8 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 		g_fLastButtonPressTime[i] = 0.0;
 		g_fLastButtonCompleteTime[i] = 0.0;
 		g_fLastButtonCancelTime[i] = 0.0;
+		g_fCarryEndTime[i] = 0.0;
+		g_fLastSpitEntryTime[i] = 0.0;
         for (int j = 1; j <= MaxClients; j++) {
             g_fLastFFTime[i][j] = 0.0;
         }
@@ -2682,6 +2694,44 @@ public void Event_BoomerExploded(Event event, const char[] name, bool dontBroadc
     g_fLastBoomerExplodeTime = GetGameTime();
 }
 
+public void Event_ChargerImpact(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int charger = GetClientOfUserId(event.GetInt("userid"));
+    int victim = GetClientOfUserId(event.GetInt("victim"));
+
+    if (charger > 0 && charger <= MaxClients && IsClientInGame(charger) &&
+        victim > 0 && victim <= MaxClients && IsClientInGame(victim))
+    {
+        char sChargerName[32], sVictimName[32];
+        GetPlayerNameSafe(charger, sChargerName, sizeof(sChargerName));
+        GetPlayerNameSafe(victim, sVictimName, sizeof(sVictimName));
+
+        LogActivity("%s was sent flying by %s's charge impact.", sVictimName, sChargerName);
+    }
+}
+
+public void Event_EnteredSpit(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client <= 0 || client > MaxClients || !IsClientInGame(client) || GetClientTeam(client) != TEAM_SURVIVOR) return;
+
+    float curTime = GetGameTime();
+    if (curTime - g_fLastSpitEntryTime[client] < 8.0)
+    {
+        return;
+    }
+    g_fLastSpitEntryTime[client] = curTime;
+
+    char sPlayerName[32];
+    GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+
+    LogActivity("%s stepped into Spitter acid.", sPlayerName);
+}
+
 public void Event_AbilityUse(Event event, const char[] name, bool dontBroadcast)
 {
     int client = GetClientOfUserId(event.GetInt("userid"));
@@ -2880,9 +2930,11 @@ void Event_PinStart(Event event, const char[] name, bool dontBroadcast)
 {
     int victim = GetClientOfUserId(event.GetInt("victim"));
     int attacker = GetClientOfUserId(event.GetInt("userid"));
-    
+
     if (victim > 0 && victim <= MaxClients && attacker > 0 && attacker <= MaxClients)
     {
+        if (g_iPinnedBy[victim] == attacker) return;
+
         g_iPinnedBy[victim] = attacker;
         g_iLastPinnedBy[victim] = attacker;
 
@@ -2892,11 +2944,10 @@ void Event_PinStart(Event event, const char[] name, bool dontBroadcast)
         if (StrEqual(name, "tongue_grab")) strcopy(sInfected, sizeof(sInfected), "Smoker");
         else if (StrEqual(name, "lunge_pounce")) strcopy(sInfected, sizeof(sInfected), "Hunter");
         else if (StrEqual(name, "jockey_ride")) strcopy(sInfected, sizeof(sInfected), "Jockey");
-        else if (StrEqual(name, "charger_pummel_start")) strcopy(sInfected, sizeof(sInfected), "Charger");
+        else if (StrEqual(name, "charger_pummel_start") || StrEqual(name, "charger_carry_start")) strcopy(sInfected, sizeof(sInfected), "Charger");
         else return;
 
-		g_bPinResolutionLogged[victim] = false;
-		
+        g_bPinResolutionLogged[victim] = false;
         LogActivity("%s got pinned by a %s.", sVictim, sInfected);
     }
 }
@@ -2913,6 +2964,16 @@ void Event_PinStop(Event event, const char[] name, bool dontBroadcast)
 
     if (attacker <= 0 || !IsClientInGame(attacker)) {
         attacker = originalAttacker;
+    }
+	
+	if (StrEqual(name, "charger_carry_end"))
+    {
+        g_fCarryEndTime[victim] = GetGameTime();
+
+        if (attacker > 0 && IsClientInGame(attacker) && IsPlayerAlive(attacker))
+        {
+            return;
+        }
     }
 
     bool isTongueCut = false;
@@ -2954,6 +3015,8 @@ public Action Timer_ResolvePinStop(Handle timer, DataPack pack)
         return Plugin_Stop;
     }
 
+    if (g_iPinnedBy[victim] == attacker) return Plugin_Stop;
+
     if (attacker <= 0 || !IsClientInGame(attacker) || !IsPlayerAlive(attacker) || GetClientHealth(attacker) <= 0)
     {
         return Plugin_Stop;
@@ -2981,7 +3044,7 @@ public Action Timer_ResolvePinStop(Handle timer, DataPack pack)
     if (zombieClass == 1 || StrContains(eventName, "tongue") != -1 || StrContains(eventName, "choke") != -1) strcopy(sInfected, sizeof(sInfected), "Smoker");
     else if (zombieClass == 3 || StrContains(eventName, "pounce") != -1) strcopy(sInfected, sizeof(sInfected), "Hunter");
     else if (zombieClass == 5 || StrContains(eventName, "jockey") != -1) strcopy(sInfected, sizeof(sInfected), "Jockey");
-    else if (zombieClass == 6 || StrContains(eventName, "charger") != -1) strcopy(sInfected, sizeof(sInfected), "Charger");
+    else if (zombieClass == 6 || StrContains(eventName, "charger") != -1 || StrContains(eventName, "carry") != -1) strcopy(sInfected, sizeof(sInfected), "Charger");
     else strcopy(sInfected, sizeof(sInfected), "Infected");
 
     char sVictim[32];
@@ -3386,6 +3449,11 @@ void GetPinEventPlayers(Event event, const char[] name, int &victim, int &attack
         victim = GetClientOfUserId(event.GetInt("victim"));
         rescuer = GetClientOfUserId(event.GetInt("rescuer"));
     }
+	else if (StrEqual(name, "charger_carry_end"))
+    {
+        attacker = GetClientOfUserId(event.GetInt("userid"));
+        victim = GetClientOfUserId(event.GetInt("victim"));
+    }
 }
 
 void UpdateDamageReceivedStat(int client, const char[] source, int damage) {
@@ -3651,13 +3719,19 @@ void UpdateBotNamesCache()
 bool IsReallyPinnedBy(int survivor, int infected)
 {
     if (GetEntPropEnt(survivor, Prop_Send, "m_tongueOwner") == infected) return true;
-    
     if (GetEntPropEnt(infected, Prop_Send, "m_tongueVictim") == survivor) return true;
-    
     if (GetEntPropEnt(survivor, Prop_Send, "m_pounceAttacker") == infected) return true;
     if (GetEntPropEnt(survivor, Prop_Send, "m_jockeyAttacker") == infected) return true;
     if (GetEntPropEnt(survivor, Prop_Send, "m_pummelAttacker") == infected) return true;
-    
+    if (GetEntPropEnt(survivor, Prop_Send, "m_carryAttacker") == infected) return true;
+
+    if (infected > 0 && IsClientInGame(infected) && IsPlayerAlive(infected))
+    {
+        if (GetGameTime() - g_fCarryEndTime[survivor] < 1.5)
+        {
+            return true;
+        }
+    }
     return false;
 }
 
