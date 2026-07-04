@@ -1759,42 +1759,30 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
     int attacker = GetClientOfUserId(event.GetInt("attacker"));
     int victim = GetClientOfUserId(event.GetInt("userid"));
     
-    int postHealth = GetSurvivorTotalHealth(victim);
-    int dmg = g_iPreDamageHealth[victim] - postHealth;
+    if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim)) return;
     
-    int preHealth = g_iPreDamageHealth[victim];
-    g_iPreDamageHealth[victim] = postHealth;
+    int victimTeam = GetClientTeam(victim);
     
-    if (dmg <= 0) return;
-    
-	bool isAttackerSurvivor = (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_SURVIVOR);
-	
-    if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR) {
+    if (victimTeam == TEAM_SURVIVOR) {
+        int postHealth = GetSurvivorTotalHealth(victim);
+        int dmg = g_iPreDamageHealth[victim] - postHealth;
+        
+        int preHealth = g_iPreDamageHealth[victim];
+        g_iPreDamageHealth[victim] = postHealth;
+        
+        if (dmg <= 0) return;
+        
         char src[64];
         strcopy(src, sizeof(src), g_sLastDamageSource[victim]);
         if (src[0] == '\0') {
             strcopy(src, sizeof(src), "world_damage");
-        }		
-		
+        }       
+        
         UpdateDamageReceivedStat(victim, src, dmg);
-		
-		if (!isAttackerSurvivor || attacker == victim) 
-        {
-            ProcessDamageLog(victim, dmg, src, preHealth);
-        }
-		else
-		{
-			ProcessDamageLog(victim, dmg, "friendly_fire", preHealth, attacker);
-		}
-		
-        int health = event.GetInt("health");
-        if (health > 0) {
-            g_sLastDamageSource[victim][0] = '\0';
-        }
-    }    
-    
-    if (isAttackerSurvivor) {
-        if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR && attacker != victim) {
+        
+        bool isAttackerSurvivor = (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_SURVIVOR);
+        
+        if (isAttackerSurvivor && attacker != victim) {
             ADD_STAT_VAL(attacker, ffDamageTotal, dmg);
             
             if (!IsFakeClient(attacker)) {
@@ -1808,18 +1796,30 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
                 if (g_Campaign[victim].ffReceivedTotal > g_Lifetime[victim].ffReceivedRecord)
                     g_Lifetime[victim].ffReceivedRecord = g_Campaign[victim].ffReceivedTotal;
             }
-            return;
         }
-    }
 
-    if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_INFECTED) {
+        if (!isAttackerSurvivor || attacker == victim) 
+        {
+            ProcessDamageLog(victim, dmg, src, preHealth);
+        }
+        else
+        {
+            ProcessDamageLog(victim, dmg, "friendly_fire", preHealth, attacker);
+        }
+        
+        int health = event.GetInt("health");
+        if (health > 0) {
+            g_sLastDamageSource[victim][0] = '\0';
+        }
+    }    
+    else if (victimTeam == TEAM_INFECTED) {
         if (GetEntProp(victim, Prop_Send, "m_zombieClass") == 8)
         {
             if (g_bTankAlive[victim])
             {
                 int currentHealth = GetClientHealth(victim);
                 if (currentHealth < 0) currentHealth = 0;
-        
+
                 int actualDmg = g_iTankLastHealth[victim] - currentHealth;
                 if (actualDmg > 0) 
                 {
@@ -1827,8 +1827,8 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
                     {
                         ADD_STAT_VAL(attacker, tankDamage, actualDmg);
                         
-						g_iDamageToTank[victim][attacker] += actualDmg;
-						
+                        g_iDamageToTank[victim][attacker] += actualDmg;
+                        
                         int weaponID = g_iClientActiveWeaponID[attacker];
                         if (weaponID != -1) {
                             UpdateWeaponStatID(attacker, weaponID, 13, actualDmg);
@@ -1846,17 +1846,17 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
             char clean[64];
             strcopy(clean, sizeof(clean), g_sCleanWeaponNames[weaponID]);
             
-            if (strcmp(clean, "fire") == 0 || strcmp(clean, "pipe_bomb") == 0 || strcmp(clean, "vomitjar") == 0) return;
-
-            int tick = GetGameTickCount();
-            if (g_iLastHitTick[attacker] != tick) { 
-                UpdateWeaponStatID(attacker, weaponID, 1); 
-                g_iLastHitTick[attacker] = tick; 
-            }
-            
-            if (event.GetInt("hitgroup") == 1 && g_iLastHeadshotTick[attacker] != tick) { 
-                UpdateWeaponStatID(attacker, weaponID, 2); 
-                g_iLastHeadshotTick[attacker] = tick; 
+            if (strcmp(clean, "fire") != 0 && strcmp(clean, "pipe_bomb") != 0 && strcmp(clean, "vomitjar") != 0) {
+                int tick = GetGameTickCount();
+                if (g_iLastHitTick[attacker] != tick) { 
+                    UpdateWeaponStatID(attacker, weaponID, 1); 
+                    g_iLastHitTick[attacker] = tick; 
+                }
+                
+                if (event.GetInt("hitgroup") == 1 && g_iLastHeadshotTick[attacker] != tick) { 
+                    UpdateWeaponStatID(attacker, weaponID, 2); 
+                    g_iLastHeadshotTick[attacker] = tick; 
+                }
             }
         }
     }
