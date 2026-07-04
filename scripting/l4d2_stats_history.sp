@@ -343,11 +343,18 @@ KeyValues g_kvCampaignCache = null;
 int g_iCampaignTime;
 ConVar g_cvDifficulty;
 ConVar g_cvBotNames[8] = { null, ... };
+ConVar g_cvPillsDecay = null;
 char g_sCachedBotNames[8][64];
 bool g_bTankBurnt[MAXPLAYERS + 1];
 bool g_bWitchBurnt[MAX_ENTITIES_TRACKED];
-float g_fLastFFTime[MAXPLAYERS + 1][MAXPLAYERS + 1];
+int g_iLastFFAttacker[MAXPLAYERS + 1];
 bool g_bIsBlackAndWhite[MAXPLAYERS + 1] = { false, ... };
+
+int g_iPreDamageHealth[MAXPLAYERS + 1];
+
+int g_iAccumulatedDamage[MAXPLAYERS + 1][MAX_DMG_SOURCES];
+int g_iPreAccumHealth[MAXPLAYERS + 1][MAX_DMG_SOURCES];
+Handle g_hDamageTimer[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 
 // ====================================================================================================
 //					PLUGIN START & END
@@ -367,6 +374,7 @@ public void OnPluginStart()
 	
 	g_hActivityLog = new ArrayList(512);
 	g_cvDifficulty = FindConVar("z_difficulty");
+	g_cvPillsDecay = FindConVar("pain_pills_decay_rate");
 	
 	g_smGuns = new StringMap();
     static const char guns[][] = { "m16_rifle", "rifle_ak47", "rifle_desert", "rifle_sg552", "smg", "smg_silenced", "smg_mp5", "pumpshotgun", "shotgun_chrome", "autoshotgun", "shotgun_spas", "hunting_rifle", "sniper_military", "sniper_awp", "sniper_scout", "pistol", "pistol_magnum", "m60", "grenade_launcher" };
@@ -591,14 +599,14 @@ void InitWeaponMap()
     MapWeapon("chainsaw", "chainsaw");
     MapWeapon("weapon_chainsaw", "chainsaw");
 	
-    MapWeapon("molotov", "molotov");
-	MapWeapon("entityflame", "molotov");
-	MapWeapon("inferno", "molotov");
-	MapWeapon("gascan", "molotov");
-	MapWeapon("weapon_gascan", "molotov");
-    MapWeapon("weapon_molotov", "molotov");
-	MapWeapon("Fireworkcrate", "molotov");
-	MapWeapon("fire_cracker_blast", "molotov");
+    MapWeapon("molotov", "fire");
+	MapWeapon("entityflame", "fire");
+	MapWeapon("inferno", "fire");
+	MapWeapon("gascan", "fire");
+	MapWeapon("weapon_gascan", "fire");
+    MapWeapon("weapon_molotov", "fire");
+	MapWeapon("Fireworkcrate", "fire");
+	MapWeapon("fire_cracker_blast", "fire");
 	
 	MapWeapon("pipe_bomb", "pipe_bomb");
     MapWeapon("pipe_bomb_projectile", "pipe_bomb");
@@ -934,6 +942,16 @@ public void OnClientDisconnect(int client)
     if (!g_bIsTransitionOrRestart) {
         g_Campaign[client].Destroy();
     }
+
+	for (int i = 0; i < MAX_DMG_SOURCES; i++)
+	{
+		if (g_hDamageTimer[client][i] != null)
+		{
+			KillTimer(g_hDamageTimer[client][i]);
+			g_hDamageTimer[client][i] = null;
+		}
+		g_iAccumulatedDamage[client][i] = 0;
+	}
 	
     g_sAuthID[client][0] = '\0';
 }
@@ -1396,9 +1414,6 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 		g_fLastButtonCancelTime[i] = 0.0;
 		g_fCarryEndTime[i] = 0.0;
 		g_fLastSpitEntryTime[i] = 0.0;
-        for (int j = 1; j <= MaxClients; j++) {
-            g_fLastFFTime[i][j] = 0.0;
-        }
     }
 	for (int i = 1; i <= MaxClients; i++) {
 		g_bIsPressingButton[i] = false;
@@ -1743,38 +1758,43 @@ void Event_WeaponFire(Event event, const char[] name, bool dontBroadcast) {
 void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
     int attacker = GetClientOfUserId(event.GetInt("attacker"));
     int victim = GetClientOfUserId(event.GetInt("userid"));
-    int dmg = event.GetInt("dmg_health");
     
+    int postHealth = GetSurvivorTotalHealth(victim);
+    int dmg = g_iPreDamageHealth[victim] - postHealth;
+    
+    int preHealth = g_iPreDamageHealth[victim];
+    g_iPreDamageHealth[victim] = postHealth;
+    
+    if (dmg <= 0) return;
+    
+	bool isAttackerSurvivor = (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_SURVIVOR);
+	
     if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR) {
         char src[64];
         strcopy(src, sizeof(src), g_sLastDamageSource[victim]);
         if (src[0] == '\0') {
             strcopy(src, sizeof(src), "world_damage");
-        }
+        }		
+		
         UpdateDamageReceivedStat(victim, src, dmg);
+		
+		if (!isAttackerSurvivor || attacker == victim) 
+        {
+            ProcessDamageLog(victim, dmg, src, preHealth);
+        }
+		else
+		{
+			ProcessDamageLog(victim, dmg, "friendly_fire", preHealth, attacker);
+		}
+		
         int health = event.GetInt("health");
         if (health > 0) {
             g_sLastDamageSource[victim][0] = '\0';
         }
-    }
-    
-    bool isAttackerSurvivor = (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_SURVIVOR);
+    }    
     
     if (isAttackerSurvivor) {
         if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR && attacker != victim) {
-            dmg = event.GetInt("dmg_health");
-            
-            float currentTime = GetGameTime();
-            if (currentTime - g_fLastFFTime[attacker][victim] > 0.5)
-            {
-                g_fLastFFTime[attacker][victim] = currentTime;
-                char sAttacker[32], sVictim[32], sWeapon[64];
-                GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
-                GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
-                event.GetString("weapon", sWeapon, sizeof(sWeapon));
-                LogActivity("%s hurt %s with %s (Friendly Fire).", sAttacker, sVictim, sWeapon);
-            }
-
             ADD_STAT_VAL(attacker, ffDamageTotal, dmg);
             
             if (!IsFakeClient(attacker)) {
@@ -1826,7 +1846,7 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
             char clean[64];
             strcopy(clean, sizeof(clean), g_sCleanWeaponNames[weaponID]);
             
-            if (strcmp(clean, "molotov") == 0 || strcmp(clean, "pipe_bomb") == 0 || strcmp(clean, "vomitjar") == 0) return;
+            if (strcmp(clean, "fire") == 0 || strcmp(clean, "pipe_bomb") == 0 || strcmp(clean, "vomitjar") == 0) return;
 
             int tick = GetGameTickCount();
             if (g_iLastHitTick[attacker] != tick) { 
@@ -1884,7 +1904,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 UpdateWeaponStat(attacker, clean, 2);
             }
 
-            if (strcmp(clean, "molotov") == 0) {
+            if (strcmp(clean, "fire") == 0) {
                 ADD_STAT(attacker, molotovKills);
             }
             else if (strcmp(clean, "pipe_bomb") == 0) {
@@ -1985,7 +2005,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
     
     UpdateWeaponStat(attacker, clean, 3);
 
-    if (strcmp(clean, "molotov") == 0) {
+    if (strcmp(clean, "fire") == 0) {
         ADD_STAT(attacker, molotovKills);
     }
     else if (strcmp(clean, "pipe_bomb") == 0) {
@@ -2119,14 +2139,19 @@ void Event_PlayerIncapacitated(Event event, const char[] name, bool dontBroadcas
         char sName[32];
         GetPlayerNameSafe(client, sName, sizeof(sName));
         
-        char sCause[64], sPrettyCause[64];
-        strcopy(sCause, sizeof(sCause), g_sLastDamageSource[client]);
-        if (sCause[0] == '\0') {
-            strcopy(sCause, sizeof(sCause), "world_damage");
-        }
-        GetPrettySourceName(sCause, sPrettyCause, sizeof(sPrettyCause));
+        char sCause[64];
+		strcopy(sCause, sizeof(sCause), g_sLastDamageSource[client]);
+		if (sCause[0] == '\0') 
+		{
+			strcopy(sCause, sizeof(sCause), "world_damage");
+		}
+		
+		char sPrettyCause[64];
+		GetPrettySourceName(sCause, sPrettyCause, sizeof(sPrettyCause));
+		
+		LogActivity("%s was incapacitated by %s (HP: %d -> 0).", sName, sPrettyCause, g_iPreDamageHealth[client]);
 
-        LogActivity("%s was incapacitated by %s.", sName, sPrettyCause);
+        g_iPreDamageHealth[client] = GetSurvivorTotalHealth(client);
     }
 }
 
@@ -2336,7 +2361,9 @@ public Action OnPlayerTakeDamage(int victim, int &attacker, int &inflictor, floa
     if (damage <= 0.0 || victim <= 0 || victim > MaxClients || !IsClientInGame(victim)) return Plugin_Continue;
 
     int victimTeam = GetClientTeam(victim);
-
+	
+	g_iPreDamageHealth[victim] = GetSurvivorTotalHealth(victim);
+	
     if (victimTeam == TEAM_SURVIVOR && damage > 0.0)
     {
         char src[64];
@@ -2465,6 +2492,149 @@ public Action OnPlayerTakeDamage(int victim, int &attacker, int &inflictor, floa
         }
     }
     return Plugin_Continue;
+}
+
+int GetSurvivorTotalHealth(int client)
+{
+    if (client <= 0 || !IsClientInGame(client) || GetClientTeam(client) != TEAM_SURVIVOR || !IsPlayerAlive(client))
+    {
+        return 0;
+    }
+    
+    int perm = GetClientHealth(client);
+    
+    if (L4D_IsPlayerIncapacitated(client))
+    {
+        return perm;
+    }
+
+    float fBuffer = GetEntPropFloat(client, Prop_Send, "m_healthBuffer");
+    float fBufferTime = GetEntPropFloat(client, Prop_Send, "m_healthBufferTime");
+    float fGameTime = GetGameTime();
+
+    float fDecayRate = 0.27;
+    if (g_cvPillsDecay != null)
+    {
+        fDecayRate = g_cvPillsDecay.FloatValue;
+    }
+
+    float fDecayedTemp = fBuffer - ((fGameTime - fBufferTime) * fDecayRate);
+    if (fDecayedTemp < 0.0)
+    {
+        fDecayedTemp = 0.0;
+    }
+
+    return perm + RoundToFloor(fDecayedTemp);
+}
+
+void ProcessDamageLog(int victim, int damage, const char[] source, int preHealth, int attacker = 0)
+{
+    if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim) || damage <= 0) return;
+
+    int sourceID = GetDamageSourceID(source);
+
+    if (sourceID == DMG_SOURCE_FF && attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
+    {
+        g_iLastFFAttacker[victim] = attacker;
+    }
+
+    if (IsSpammySource(sourceID))
+    {
+        if (g_iAccumulatedDamage[victim][sourceID] == 0)
+        {
+            g_iPreAccumHealth[victim][sourceID] = preHealth;
+            any timerData = EncodeTimerData(victim, sourceID);
+            g_hDamageTimer[victim][sourceID] = CreateTimer(1.5, Timer_LogAccumulatedDamage, timerData, TIMER_FLAG_NO_MAPCHANGE);
+        }
+        g_iAccumulatedDamage[victim][sourceID] += damage;
+    }
+    else
+    {
+        int postHealth = GetSurvivorTotalHealth(victim);
+        
+        char sVictim[32], sPrettyCause[64];
+        GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
+        GetPrettySourceName(source, sPrettyCause, sizeof(sPrettyCause));
+        
+        if (sourceID == DMG_SOURCE_FF && attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
+        {
+            char sAttacker[32];
+            GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
+            LogActivity("%s took %d Friendly Fire damage from %s (HP: %d -> %d).", sVictim, damage, sAttacker, preHealth, postHealth);
+        }
+        else
+        {
+            LogActivity("%s took %d damage from %s (HP: %d -> %d).", sVictim, damage, sPrettyCause, preHealth, postHealth);
+        }
+    }
+}
+
+public Action Timer_LogAccumulatedDamage(Handle timer, any data)
+{
+    int client, sourceID;
+    DecodeTimerData(data, client, sourceID);
+
+    if (client <= 0 || !IsClientInGame(client)) return Plugin_Stop;
+
+    g_hDamageTimer[client][sourceID] = null;
+
+    int damage = g_iAccumulatedDamage[client][sourceID];
+    if (damage > 0)
+    {
+        int preHealth = g_iPreAccumHealth[client][sourceID];
+        
+        int postHealth = preHealth - damage;
+        if (postHealth < 0) postHealth = 0;
+
+        char sName[32], sPrettyCause[64];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        GetPrettySourceName(g_sDamageSourceKeys[sourceID], sPrettyCause, sizeof(sPrettyCause));
+
+        if (sourceID == DMG_SOURCE_FF)
+        {
+            int attacker = g_iLastFFAttacker[client];
+            char sAttacker[32];
+            if (attacker > 0 && IsClientInGame(attacker))
+            {
+                GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
+                LogActivity("%s took %d Friendly Fire damage from %s (HP: %d -> %d).", sName, damage, sAttacker, preHealth, postHealth);
+            }
+            else
+            {
+                LogActivity("%s took %d damage from Friendly Fire (HP: %d -> %d).", sName, damage, preHealth, postHealth);
+            }
+            g_iLastFFAttacker[client] = 0;
+        }
+        else
+        {
+            LogActivity("%s took %d damage from %s (HP: %d -> %d).", sName, damage, sPrettyCause, preHealth, postHealth);
+        }
+
+        g_iAccumulatedDamage[client][sourceID] = 0;
+    }
+    return Plugin_Stop;
+}
+
+bool IsSpammySource(int sourceID)
+{
+    return (sourceID == DMG_SOURCE_COMMON 
+         || sourceID == DMG_SOURCE_SPITTER 
+         || sourceID == DMG_SOURCE_ENV_FIRE 
+         || sourceID == DMG_SOURCE_SELF 
+		 || sourceID == DMG_SOURCE_WITCH
+         || sourceID == DMG_SOURCE_FF
+         || sourceID == DMG_SOURCE_INCAP_DECAY);
+}
+
+any EncodeTimerData(int client, int sourceID)
+{
+    return (client << 8) | sourceID;
+}
+
+void DecodeTimerData(any data, int &client, int &sourceID)
+{
+    client = (data >> 8) & 0xFF;
+    sourceID = data & 0xFF;
 }
 
 public Action OnWitchTraceAttack(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &ammotype, int hitbox, int hitgroup)
@@ -2771,6 +2941,8 @@ void Event_PillsUsed(Event event, const char[] n, bool d) {
     if (client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR) { 
         ADD_STAT(client, pillsUsed);
 		
+		g_iPreDamageHealth[client] = GetSurvivorTotalHealth(client);
+		
         char sName[32];
         GetPlayerNameSafe(client, sName, sizeof(sName));
         LogActivity("%s used Pain Pills.", sName);
@@ -2781,6 +2953,8 @@ void Event_AdrenalineUsed(Event event, const char[] n, bool d) {
     int client = GetClientOfUserId(event.GetInt("userid"));
     if (client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR) { 
         ADD_STAT(client, adrenalineUsed);
+		
+		g_iPreDamageHealth[client] = GetSurvivorTotalHealth(client);
 		
         char sName[32];
         GetPlayerNameSafe(client, sName, sizeof(sName));
@@ -2830,6 +3004,8 @@ void Event_DefibUsed(Event event, const char[] name, bool dontBroadcast) {
         GetPlayerNameSafe(client, sActor, sizeof(sActor));
         GetPlayerNameSafe(subject, sRecipient, sizeof(sRecipient));
         LogActivity("%s defibrillated %s.", sActor, sRecipient);
+		
+		g_iPreDamageHealth[subject] = GetSurvivorTotalHealth(subject);
     }
 }
 
@@ -2849,6 +3025,8 @@ void Event_HealSuccess(Event event, const char[] n, bool d) {
             ADD_STAT(h, medkitsShared);
             LogActivity("%s healed %s.", sHealer, sSubject);
         }
+		
+		g_iPreDamageHealth[s] = GetSurvivorTotalHealth(s);
 		
 		if (s > 0 && s <= MaxClients && g_bIsBlackAndWhite[s]) {
             g_bIsBlackAndWhite[s] = false;
@@ -2902,6 +3080,8 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
         } else {
             LogActivity("%s revived %s.", sActor, sRecipient);
         }
+		
+		g_iPreDamageHealth[subject] = GetSurvivorTotalHealth(subject);
 		
 		if (GetEntProp(subject, Prop_Send, "m_bIsOnThirdStrike")) {
             g_bIsBlackAndWhite[subject] = true;
@@ -3352,6 +3532,8 @@ void GetPrettyWeaponName(const char[] classname, char[] buffer, int maxlen) {
     else if (StrEqual(classname, "pitchfork")) strcopy(buffer, maxlen, "Pitchfork");
     else if (StrEqual(classname, "shovel")) strcopy(buffer, maxlen, "Shovel");
     else if (StrEqual(classname, "riot_shield")) strcopy(buffer, maxlen, "Riot Shield");
+	
+	else if (StrEqual(classname, "fire")) strcopy(buffer, maxlen, "Fire");
 
     else {
         strcopy(buffer, maxlen, classname);
