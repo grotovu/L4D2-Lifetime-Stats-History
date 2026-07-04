@@ -512,6 +512,10 @@ public void OnPluginStart()
 	
 	HookEvent("gascan_pour_completed", Event_GasCanPourCompleted);
 	HookEvent("gascan_pour_interrupted", Event_GasCanPourInterrupted);
+	
+	HookEvent("item_pickup", Event_ItemPickup);
+	HookEvent("weapon_drop", Event_WeaponDrop);
+	HookEvent("weapon_drop_to_prop", Event_WeaponDrop);
 
 	HookEntityOutput("func_button", "OnPressed", Output_OnButtonInstant);
 	HookEntityOutput("func_button_timed", "OnPressed", Output_OnButtonStartHold);
@@ -1366,6 +1370,8 @@ public void OnMapStart()
     g_hSecondTimer = CreateTimer(1.0, Timer_SecondTicker, _, TIMER_REPEAT);
 	
 	LogActivity(">>> Map: %s <<<", mapName);
+	
+	HookColaBuyerEntity();
 }
 
 public void OnMapEnd()
@@ -6039,6 +6045,43 @@ public void Event_GasCanPourInterrupted(Event event, const char[] name, bool don
     LogActivity("%s's gas can pouring was interrupted.", sPlayerName);
 }
 
+public void Event_ItemPickup(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    char item[64];
+    event.GetString("item", item, sizeof(item));
+
+    if (StrContains(item, "cola_bottles", false) != -1)
+    {
+        int client = GetClientOfUserId(event.GetInt("userid"));
+        if (client > 0 && IsClientInGame(client))
+        {
+            char sPlayerName[32];
+            GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+            LogActivity("%s picked up the Cola Bottles.", sPlayerName);
+        }
+    }
+}
+
+public void Event_WeaponDrop(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    char item[64];
+    event.GetString("item", item, sizeof(item));
+    if (StrContains(item, "cola_bottles", false) != -1)
+    {
+        int client = GetClientOfUserId(event.GetInt("userid"));
+        if (client > 0 && IsClientInGame(client))
+        {
+            char sPlayerName[32];
+            GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+            LogActivity("%s dropped the Cola Bottles.", sPlayerName);
+        }
+    }
+}
+
 public void Output_OnButtonInstant(const char[] output, int caller, int activator, float delay)
 {
     if (activator <= 0 || activator > MaxClients || !IsClientInGame(activator)) return;
@@ -6275,4 +6318,71 @@ int GetClosestSurvivorToFinale()
         return closestPlayer;
     }
     return -1;
+}
+
+// ====================================================================================================
+//                  C1M2 STREETS - COLA SPECIFIC FUNCTIONS
+// ====================================================================================================
+
+void HookColaBuyerEntity()
+{
+    char mapName[64];
+    GetCurrentMap(mapName, sizeof(mapName));
+    if (StrContains(mapName, "c1m2", false) == -1) return;
+
+    int maxEntities = GetMaxEntities();
+    for (int entity = 1; entity < maxEntities; entity++)
+    {
+        if (IsValidEntity(entity))
+        {
+            char classname[64];
+            GetEntityClassname(entity, classname, sizeof(classname));
+
+            if (StrEqual(classname, "point_prop_use_target", false) || StrEqual(classname, "point_script_use_target", false))
+            {
+                HookSingleEntityOutput(entity, "OnUseFinished", Output_ColaBuyerFinished);
+                //LogActivity("[Debug] Successfully hooked Whitaker's cola delivery slot (Entity index: %d, Class: %s)!", entity, classname);
+                break;
+            }
+        }
+    }
+}
+
+public void Output_ColaBuyerFinished(const char[] output, int caller, int activator, float delay)
+{
+    int player = activator;
+
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player))
+    {
+        player = GetEntPropEnt(caller, Prop_Send, "m_useActionOwner");
+    }
+    
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player))
+    {
+        float targetPos[3];
+        GetEntPropVector(caller, Prop_Send, "m_vecOrigin", targetPos);
+        float minDistance = 999999.0;
+        for (int i = 1; i <= MaxClients; i++)
+        {
+            if (IsValidSurvivor(i) && IsPlayerAlive(i))
+            {
+                float plyPos[3];
+                GetClientAbsOrigin(i, plyPos);
+                float dist = GetVectorDistance(plyPos, targetPos);
+                if (dist < minDistance)
+                    player = i;
+            }
+        }
+    }
+
+    if (player > 0 && IsClientInGame(player))
+    {
+        char sPlayerName[32];
+        GetPlayerNameSafe(player, sPlayerName, sizeof(sPlayerName));
+        LogActivity("%s successfully delivered the cola to Whitaker!", sPlayerName);
+    }
+    else
+    {
+        LogActivity("The Cola Bottles were successfully delivered to Whitaker!");
+    }
 }
