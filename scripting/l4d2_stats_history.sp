@@ -797,6 +797,22 @@ public Action Timer_SecondTicker(Handle timer)
                     g_smPlayerLastCampaign.SetString(g_sAuthID[i], g_sCurrentCampaignID);
                 }
             }
+
+            if (IsPlayerAlive(i) && !L4D_IsPlayerIncapacitated(i)) {
+                bool isBW = view_as<bool>(GetEntProp(i, Prop_Send, "m_bIsOnThirdStrike"));
+                if (isBW && !g_bIsBlackAndWhite[i]) {
+                    g_bIsBlackAndWhite[i] = true;
+                    char sName[32];
+                    GetPlayerNameSafe(i, sName, sizeof(sName));
+                    LogActivity("%s is now Black and White!", sName);
+                }
+                else if (!isBW && g_bIsBlackAndWhite[i]) {
+                    g_bIsBlackAndWhite[i] = false;
+                    char sName[32];
+                    GetPlayerNameSafe(i, sName, sizeof(sName));
+                    LogActivity("%s is no longer Black and White.", sName);
+                }
+            }
         }
     }
     return Plugin_Continue;
@@ -3029,11 +3045,6 @@ void Event_HealSuccess(Event event, const char[] n, bool d) {
         }
 		
 		g_iPreDamageHealth[s] = GetSurvivorTotalHealth(s);
-		
-		if (s > 0 && s <= MaxClients && g_bIsBlackAndWhite[s]) {
-            g_bIsBlackAndWhite[s] = false;
-            LogActivity("%s is no longer Black and White.", sSubject);
-        }
     }
     
     if (s > 0 && s <= MaxClients && IsClientInGame(s) && GetClientTeam(s) == TEAM_SURVIVOR) {
@@ -3091,11 +3102,6 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
         }
         
         g_iPreDamageHealth[subject] = GetSurvivorTotalHealth(subject);
-        
-        if (GetEntProp(subject, Prop_Send, "m_bIsOnThirdStrike")) {
-            g_bIsBlackAndWhite[subject] = true;
-            LogActivity("%s is now Black and White!", sRecipient);
-        }
     }
 }
 
