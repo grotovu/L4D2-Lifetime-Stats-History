@@ -368,6 +368,7 @@ bool g_bPropExploded[MAX_ENTITIES_TRACKED] = { false, ... };
 bool g_bGnomeWon = false;
 bool g_bCarryingCola[MAXPLAYERS + 1] = { false, ... };
 bool g_bCarryingGnome[MAXPLAYERS + 1] = { false, ... };
+int g_iLastColaCarrier = 0;
 
 bool g_bStartingDoorOpened = false;
 
@@ -1344,6 +1345,7 @@ public void OnMapStart()
     g_fLastGameTime = 0.0;
 	g_iCansPoured = 0;
 	g_fLastFinaleTriggerTime = 0.0;
+	g_iLastColaCarrier = 0;
     
     for (int i = 1; i <= MaxClients; i++) {
         g_bHasWonCampaign[i] = false;
@@ -1449,9 +1451,10 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 	g_bIsTransitionOrRestart = false;
 	g_iCansPoured = 0;
 	g_fLastFinaleTriggerTime = 0.0;
+	g_iLastColaCarrier = 0;
 	
 	g_bGnomeWon = false;
-	g_bStartingDoorOpened = false;
+	g_bStartingDoorOpened = L4D_IsFirstMapInScenario();
 	
 	for (int i = 1; i <= MaxClients; i++) {
         g_bTankAlive[i] = false;
@@ -2853,6 +2856,7 @@ public void OnWeaponSwitchPost(int client, int weapon)
 
     if (StrContains(clsName, "cola_bottles", false) != -1 && !g_bCarryingCola[client]) {
         g_bCarryingCola[client] = true;
+		g_iLastColaCarrier = client;
         char sPlayerName[32];
         GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
         LogActivity("%s picked up the Cola Bottles.", sPlayerName);
@@ -6464,6 +6468,14 @@ public void Output_ColaBuyerFinished(const char[] output, int caller, int activa
     if (player <= 0 || player > MaxClients || !IsClientInGame(player))
     {
         player = GetEntPropEnt(caller, Prop_Send, "m_useActionOwner");
+    }
+    
+    if (player <= 0 || player > MaxClients || !IsClientInGame(player))
+    {
+        if (g_iLastColaCarrier > 0 && IsClientInGame(g_iLastColaCarrier) && GetClientTeam(g_iLastColaCarrier) == TEAM_SURVIVOR)
+        {
+            player = g_iLastColaCarrier;
+        }
     }
     
     if (player <= 0 || player > MaxClients || !IsClientInGame(player))
