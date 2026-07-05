@@ -38,7 +38,8 @@
 #define DMG_SOURCE_SELF         14
 #define DMG_SOURCE_INCAP_DECAY  15
 #define DMG_SOURCE_WORLD        16
-#define MAX_DMG_SOURCES         17 
+#define DMG_SOURCE_SELF_FIRE	17
+#define MAX_DMG_SOURCES         18 
 
 #define ADD_STAT(%1,%2) do{if(!g_bIsBot[%1]){if(g_bStatsLoaded[%1]){g_Lifetime[%1].%2++;g_Campaign[%1].%2++;}}else{if(g_iClientChar[%1]>=0&&g_iClientChar[%1]<MAX_BOT_CHARS){g_BotCampaign[g_iClientChar[%1]].%2++;}}}while(g_bMacroLoopFalse)
 
@@ -53,7 +54,7 @@
 char g_sDamageSourceKeys[MAX_DMG_SOURCES][32] = {
     "infected", "witch_claw", "tank_punch", "tank_rock", "hunter",
     "smoker", "jockey", "charger", "spitter", "boomer",
-    "friendly_fire", "fall_damage", "env_fire", "map_hazard", "self_damage", "incap_decay", "world_damage"
+    "friendly_fire", "fall_damage", "env_fire", "map_hazard", "self_damage", "incap_decay", "world_damage", "self_fire"
 };
 
 WeaponStats g_WeaponLifetimeCache[MAXPLAYERS + 1][128];
@@ -264,6 +265,7 @@ bool g_bPrintedThisRound = false;
 int g_iLastHitTick[MAXPLAYERS + 1];
 int g_iLastHeadshotTick[MAXPLAYERS + 1];
 bool g_bIsWitchHeadshot[MAX_ENTITIES_TRACKED];
+bool g_bWitchDamagedByNonMelee[MAX_ENTITIES_TRACKED] = { false, ... };
 
 int g_iLastDeathTick[MAXPLAYERS + 1];
 char g_sLastDeathWeapon[MAXPLAYERS + 1][64];
@@ -484,6 +486,8 @@ public void OnPluginStart()
 	HookEvent("player_bot_replace",   Event_BotReplacedPlayer);
 	HookEvent("bot_player_replace",   Event_PlayerReplacedBot);
 	
+	HookEvent("upgrade_pack_used", 	  Event_UpgradePackUsed);
+	
 	HookEvent("boomer_exploded", 	  Event_BoomerExploded);
 	HookEvent("ability_use",          Event_AbilityUse);
 	
@@ -520,6 +524,7 @@ public void OnPluginStart()
     HookEvent("punched_clown",              Event_PunchedClown);
 	
 	HookEvent("triggered_car_alarm", Event_TriggeredCarAlarm);
+	HookEvent("create_panic_event", Event_CreatePanicEvent);
 	
 	HookEvent("finale_start", Event_FinaleStart, EventHookMode_PostNoCopy);
 	HookEvent("gauntlet_finale_start", Event_GauntletFinaleStart, EventHookMode_PostNoCopy);
@@ -1480,6 +1485,7 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
     for (int w = 0; w < MAX_ENTITIES_TRACKED; w++) {
         g_iWitchDamageAwarded[w] = 0;
         g_bWitchBurnt[w] = false;
+		g_bWitchDamagedByNonMelee[w] = false;
     }
 }
 
@@ -2192,23 +2198,24 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
 
 void Event_PlayerIncapacitated(Event event, const char[] name, bool dontBroadcast) {
     int client = GetClientOfUserId(event.GetInt("userid"));
+    int attacker = GetClientOfUserId(event.GetInt("attacker"));
+
     if (client > 0 && client <= MaxClients && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR) {
         ADD_STAT(client, incaps);
-        char sName[32];
+        char sName[32], sCause[64], sPrettyCause[64];
         GetPlayerNameSafe(client, sName, sizeof(sName));
         
-        char sCause[64];
-		strcopy(sCause, sizeof(sCause), g_sLastDamageSource[client]);
-		if (sCause[0] == '\0') 
-		{
-			strcopy(sCause, sizeof(sCause), "world_damage");
-		}
-		
-		char sPrettyCause[64];
-		GetPrettySourceName(sCause, sPrettyCause, sizeof(sPrettyCause));
-		
-		LogActivity("%s was incapacitated by %s (HP: %d -> 0).", sName, sPrettyCause, g_iPreDamageHealth[client]);
-
+        strcopy(sCause, sizeof(sCause), g_sLastDamageSource[client]);
+        if (sCause[0] == '\0') strcopy(sCause, sizeof(sCause), "world_damage");
+        GetPrettySourceName(sCause, sPrettyCause, sizeof(sPrettyCause));
+        
+        if (StrEqual(sCause, "friendly_fire") && attacker > 0 && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_SURVIVOR && attacker != client) {
+            char sAttacker[32];
+            GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
+            LogActivity("%s was incapacitated by Friendly Fire from %s (HP: %d -> 0).", sName, sAttacker, g_iPreDamageHealth[client]);
+        } else {
+            LogActivity("%s was incapacitated by %s (HP: %d -> 0).", sName, sPrettyCause, g_iPreDamageHealth[client]);
+        }
         g_iPreDamageHealth[client] = GetSurvivorTotalHealth(client);
     }
 }
@@ -2334,26 +2341,33 @@ void Event_WitchKilled(Event event, const char[] name, bool dontBroadcast) {
     if (IsSurvivor(attacker)) {
         ADD_STAT(attacker, killsWitch);
 
-		int weaponID = g_iClientActiveWeaponID[attacker];
-		if (weaponID != -1) {
-			UpdateWeaponStatID(attacker, weaponID, 3);
-			UpdateWeaponStatID(attacker, weaponID, 12);
-			
-			if (event.GetBool("oneshot")) {
-				ADD_STAT(attacker, witchCrowns);
-				UpdateWeaponStatID(attacker, weaponID, 16);
-				
-				char sName[32];
-				GetPlayerNameSafe(attacker, sName, sizeof(sName));
-				LogActivity("%s crowned the Witch.", sName);
-				LogWitchDamageBreakdown(witch);
-				return;
-			}
-		}
+        int weaponID = g_iClientActiveWeaponID[attacker];
+        if (weaponID != -1) {
+            UpdateWeaponStatID(attacker, weaponID, 3);
+            UpdateWeaponStatID(attacker, weaponID, 12);
+            
+            if (event.GetBool("oneshot")) {
+                ADD_STAT(attacker, witchCrowns);
+                UpdateWeaponStatID(attacker, weaponID, 16);
+                
+                char sName[32];
+                GetPlayerNameSafe(attacker, sName, sizeof(sName));
+                LogActivity("%s crowned the Witch.", sName);
+                LogWitchDamageBreakdown(witch);
+                return;
+            }
+        }
+        
         char sName[32];
         GetPlayerNameSafe(attacker, sName, sizeof(sName));
-        LogActivity("%s killed the Witch.", sName);
-		LogWitchDamageBreakdown(witch);
+        
+        if (!g_bWitchDamagedByNonMelee[witch]) {
+            LogActivity("%s killed the Witch using only melee weapons.", sName);
+        } else {
+            LogActivity("%s killed the Witch.", sName);
+        }
+        
+        LogWitchDamageBreakdown(witch);
     }
 }
 
@@ -2404,6 +2418,7 @@ public void OnEntityCreated(int entity, const char[] classname)
             g_bIsWitchHeadshot[entity] = false;
             g_bIsWitchEntity[entity] = true;
 			g_bWitchBurnt[entity] = false;
+			g_bWitchDamagedByNonMelee[entity] = false;
             SDKHook(entity, SDKHook_TraceAttack, OnWitchTraceAttack);
             SDKHook(entity, SDKHook_OnTakeDamage, OnWitchTakeDamage);
 			
@@ -2473,7 +2488,14 @@ public Action OnPlayerTakeDamage(int victim, int &attacker, int &inflictor, floa
         {
             if (attacker == victim)
             {
-                strcopy(src, sizeof(src), "self_damage");
+                if (damagetype & 8) 
+                {
+                    strcopy(src, sizeof(src), "self_fire");
+                }
+                else 
+                {
+                    strcopy(src, sizeof(src), "self_damage");
+                }
             }
             else
             {
@@ -2716,6 +2738,7 @@ bool IsSpammySource(int sourceID)
          || sourceID == DMG_SOURCE_SPITTER 
          || sourceID == DMG_SOURCE_ENV_FIRE 
          || sourceID == DMG_SOURCE_SELF 
+		 || sourceID == DMG_SOURCE_SELF_FIRE
 		 || sourceID == DMG_SOURCE_WITCH
          || sourceID == DMG_SOURCE_FF
          || sourceID == DMG_SOURCE_INCAP_DECAY);
@@ -2754,6 +2777,35 @@ public Action OnWitchTakeDamage(int victim, int &attacker, int &inflictor, float
                 GetPlayerNameSafe(attacker, sName, sizeof(sName));
                 LogActivity("%s set the Witch on fire.", sName);
             }
+            g_bWitchDamagedByNonMelee[victim] = true;
+        }
+
+        if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
+        {
+            int wEnt = GetEntPropEnt(attacker, Prop_Send, "m_hActiveWeapon");
+            if (wEnt > 0 && IsValidEntity(wEnt))
+            {
+                char clsName[64];
+                GetEntityClassname(wEnt, clsName, sizeof(clsName));
+                char clean[64];
+                GetCleanWeaponName(attacker, clsName, clean, sizeof(clean), wEnt);
+                
+                if (!IsMelee(clean))
+                {
+                    g_bWitchDamagedByNonMelee[victim] = true;
+                }
+            }
+            else
+            {
+                if (inflictor != attacker)
+                {
+                    g_bWitchDamagedByNonMelee[victim] = true;
+                }
+            }
+        }
+        else
+        {
+            g_bWitchDamagedByNonMelee[victim] = true;
         }
     }
     return Plugin_Continue;
@@ -2801,6 +2853,13 @@ void Event_BotReplacedPlayer(Event event, const char[] name, bool dontBroadcast)
 			g_iDamageToTank[p][i] = 0;
 		}
 	}
+	
+	if (p > 0 && IsClientInGame(p)) {
+        char sPlayer[32], sBot[32];
+        GetClientName(p, sPlayer, sizeof(sPlayer));
+        GetBotPrettyName(GetSurvivorCharacterInternal(b), sBot, sizeof(sBot), b);
+        LogActivity("%s left the game. %s (BOT) is taking over.", sPlayer, sBot);
+    }
 }
 
 void Event_PlayerReplacedBot(Event event, const char[] name, bool dontBroadcast) {
@@ -2820,6 +2879,38 @@ void Event_PlayerReplacedBot(Event event, const char[] name, bool dontBroadcast)
 			g_iDamageToTank[b][i] = 0;
 		}
 	}
+	
+	if (p > 0 && IsClientInGame(p)) {
+        char sPlayer[32], sBot[32];
+        GetClientName(p, sPlayer, sizeof(sPlayer));
+        GetBotPrettyName(GetSurvivorCharacterInternal(p), sBot, sizeof(sBot), b);
+        LogActivity("%s joined the game and took over %s.", sPlayer, sBot);
+    }
+}
+
+public void Event_UpgradePackUsed(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    int upgradeid = event.GetInt("upgradeid");
+
+    if (client > 0 && IsClientInGame(client))
+    {
+        char sName[32], sClass[64], sPackType[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        
+        if (upgradeid > 0 && IsValidEntity(upgradeid)) {
+            GetEntityClassname(upgradeid, sClass, sizeof(sClass));
+            if (StrContains(sClass, "incendiary") != -1) strcopy(sPackType, sizeof(sPackType), "Incendiary");
+            else if (StrContains(sClass, "explosive") != -1) strcopy(sPackType, sizeof(sPackType), "Explosive");
+            else strcopy(sPackType, sizeof(sPackType), "Special");
+        } else {
+            strcopy(sPackType, sizeof(sPackType), "Special");
+        }
+
+        LogActivity("%s deployed %s Ammo!", sName, sPackType);
+    }
 }
 
 public void OnWeaponSwitchPost(int client, int weapon)
@@ -3421,6 +3512,19 @@ void Event_TriggeredCarAlarm(Event event, const char[] name, bool dontBroadcast)
     }
 }
 
+public void Event_CreatePanicEvent(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client > 0 && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR)
+    {
+        char sName[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        LogActivity("%s triggered a Panic Event!", sName);
+    }
+}
+
 public void Event_StrongmanBellKnockedOff(Event event, const char[] name, bool dontBroadcast)
 {
     int client = GetClientOfUserId(event.GetInt("userid"));
@@ -3884,6 +3988,7 @@ void GetPrettySourceName(const char[] source, char[] buffer, int maxlen) {
     else if (StrEqual(source, "self_damage")) strcopy(buffer, maxlen, "Self Inflicted Damage");
 	else if (StrEqual(source, "incap_decay")) strcopy(buffer, maxlen, "Incapacitation / Bleed-out");
     else if (StrEqual(source, "world_damage")) strcopy(buffer, maxlen, "World / Physics Impact");
+	else if (StrEqual(source, "self_fire")) strcopy(buffer, maxlen, "Self-Inflicted Fire");
     else {
         strcopy(buffer, maxlen, source);
         if (buffer[0] != '\0') buffer[0] = CharToUpper(buffer[0]);
