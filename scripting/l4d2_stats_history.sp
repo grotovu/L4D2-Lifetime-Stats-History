@@ -114,6 +114,9 @@ enum struct LifetimeStats
 	int   ledgeGrabs;
 	int   ledgeRescues;
 	
+	int   closetRescues;
+	int   rescuedFromCloset;
+	
 	int   ffDamageTotal;
 	int   ffDamageRecord;
 	int   ffReceivedTotal;
@@ -172,6 +175,9 @@ enum struct LifetimeStats
 		
 		this.ledgeGrabs = 0;
 		this.ledgeRescues = 0;
+		
+		this.closetRescues = 0;
+		this.rescuedFromCloset = 0;
 		
 		this.ffDamageTotal = 0; this.ffDamageRecord = 0;
 		this.ffReceivedTotal = 0; this.ffReceivedRecord = 0;
@@ -707,7 +713,7 @@ void InitDatabase()
         ... "pills_shared INTEGER DEFAULT 0, adrenaline_used INTEGER DEFAULT 0, adrenaline_shared INTEGER DEFAULT 0, defibs_used INTEGER DEFAULT 0, "
         ... "defibbed_by_teammate INTEGER DEFAULT 0, revives_total INTEGER DEFAULT 0, revives_record INTEGER DEFAULT 0, revived_by_teammate INTEGER DEFAULT 0, "
         ... "revived_by_teammate_record INTEGER DEFAULT 0, protections_total INTEGER DEFAULT 0, protections_record INTEGER DEFAULT 0, protected_by_teammate INTEGER DEFAULT 0, ledge_grabs INTEGER DEFAULT 0, ledge_rescues INTEGER DEFAULT 0, "
-        ... "protected_by_teammate_record INTEGER DEFAULT 0, ff_damage_total INTEGER DEFAULT 0, ff_damage_record INTEGER DEFAULT 0, ff_received_total INTEGER DEFAULT 0, "
+        ... "protected_by_teammate_record INTEGER DEFAULT 0, closet_rescues INTEGER DEFAULT 0, rescued_from_closet INTEGER DEFAULT 0, ff_damage_total INTEGER DEFAULT 0, ff_damage_record INTEGER DEFAULT 0, ff_received_total INTEGER DEFAULT 0, "
         ... "ff_received_record INTEGER DEFAULT 0, molotovs_thrown INTEGER DEFAULT 0, molotov_kills INTEGER DEFAULT 0, pipes_thrown INTEGER DEFAULT 0, "
         ... "pipe_kills INTEGER DEFAULT 0, biles_thrown INTEGER DEFAULT 0, bile_hits INTEGER DEFAULT 0, kills_common INTEGER DEFAULT 0, "
         ... "kills_tank INTEGER DEFAULT 0, kills_witch INTEGER DEFAULT 0, kills_smoker INTEGER DEFAULT 0, kills_hunter INTEGER DEFAULT 0, "
@@ -1009,7 +1015,7 @@ void LoadPlayerStats(int client, const char[] auth)
         "adrenaline_used, adrenaline_shared, defibs_used, defibbed_by_teammate, " ...
         "revives_total, revives_record, revived_by_teammate, revived_by_teammate_record, " ...
         "protections_total, protections_record, protected_by_teammate, protected_by_teammate_record, ledge_grabs, ledge_rescues, " ...
-        "ff_damage_total, ff_damage_record, ff_received_total, ff_received_record, " ...
+        "closet_rescues, rescued_from_closet, ff_damage_total, ff_damage_record, ff_received_total, ff_received_record, " ...
         "molotovs_thrown, molotov_kills, pipes_thrown, pipe_kills, biles_thrown, bile_hits, " ...
         "kills_common, kills_tank, kills_witch, kills_smoker, kills_hunter, kills_boomer, " ...
         "kills_charger, kills_jockey, kills_spitter, tank_damage, witch_damage, " ...
@@ -1058,6 +1064,8 @@ public void SQL_Callback_LoadPlayerStats(Database db, DBResultSet results, const
         g_Lifetime[client].protectedByTeammateRecord = results.FetchInt(col++);
 		g_Lifetime[client].ledgeGrabs                = results.FetchInt(col++);
         g_Lifetime[client].ledgeRescues              = results.FetchInt(col++);
+		g_Lifetime[client].closetRescues             = results.FetchInt(col++);
+        g_Lifetime[client].rescuedFromCloset         = results.FetchInt(col++);
         g_Lifetime[client].ffDamageTotal             = results.FetchInt(col++);
         g_Lifetime[client].ffDamageRecord            = results.FetchInt(col++);
         g_Lifetime[client].ffReceivedTotal           = results.FetchInt(col++);
@@ -1237,7 +1245,7 @@ void AddPlayerToTransaction(int client, Transaction hTr)
         "medkits_used, medkits_shared, healed_by_teammate, pills_used, pills_shared, " ...
         "adrenaline_used, adrenaline_shared, defibs_used, defibbed_by_teammate, " ...
         "revives_total, revives_record, revived_by_teammate, revived_by_teammate_record, " ...
-        "protections_total, protections_record, protected_by_teammate, protected_by_teammate_record, ledge_grabs, ledge_rescues, " ...
+        "protections_total, protections_record, protected_by_teammate, protected_by_teammate_record, ledge_grabs, ledge_rescues, closet_rescues, rescued_from_closet, " ...
         "ff_damage_total, ff_damage_record, ff_received_total, ff_received_record, " ...
         "molotovs_thrown, molotov_kills, pipes_thrown, pipe_kills, biles_thrown, bile_hits, " ...
         "kills_common, kills_tank, kills_witch, kills_smoker, kills_hunter, kills_boomer, " ...
@@ -1245,7 +1253,7 @@ void AddPlayerToTransaction(int client, Transaction hTr)
         "hunter_skeets, witch_crowns, tongue_cuts, self_rescues, charger_levels, rock_skeets, " ...
         "spitter_killed_pre_spat, jockey_deadstops, hunter_deadstops, " ...
 		"witches_startled, times_boomed, car_alarms_triggered " ...
-        ") VALUES ('%s', %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d);",
+        ") VALUES ('%s', %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d);",
         auth, 
         g_Lifetime[client].totalSeconds, g_Lifetime[client].campaignsPlayed, g_Lifetime[client].campaignsWon, g_Lifetime[client].totalRestarts,
 		g_Lifetime[client].incaps, g_Lifetime[client].deaths,
@@ -1253,7 +1261,7 @@ void AddPlayerToTransaction(int client, Transaction hTr)
         g_Lifetime[client].pillsShared, g_Lifetime[client].adrenalineUsed, g_Lifetime[client].adrenalineShared, g_Lifetime[client].defibsUsed, 
         g_Lifetime[client].defibbedByTeammate, g_Lifetime[client].revivesTotal, g_Lifetime[client].revivesRecord, g_Lifetime[client].revivedByTeammate, 
         g_Lifetime[client].revivedByTeammateRecord, g_Lifetime[client].protectionsTotal, g_Lifetime[client].protectionsRecord, g_Lifetime[client].protectedByTeammate, 
-        g_Lifetime[client].protectedByTeammateRecord, g_Lifetime[client].ledgeGrabs, g_Lifetime[client].ledgeRescues, g_Lifetime[client].ffDamageTotal, g_Lifetime[client].ffDamageRecord, g_Lifetime[client].ffReceivedTotal, 
+        g_Lifetime[client].protectedByTeammateRecord, g_Lifetime[client].ledgeGrabs, g_Lifetime[client].ledgeRescues, g_Lifetime[client].closetRescues, g_Lifetime[client].rescuedFromCloset, g_Lifetime[client].ffDamageTotal, g_Lifetime[client].ffDamageRecord, g_Lifetime[client].ffReceivedTotal, 
         g_Lifetime[client].ffReceivedRecord, g_Lifetime[client].molotovsThrown, g_Lifetime[client].molotovKills, g_Lifetime[client].pipesThrown, 
         g_Lifetime[client].pipeKills, g_Lifetime[client].bilesThrown, g_Lifetime[client].bileHits, g_Lifetime[client].killsCommon, 
         g_Lifetime[client].killsTank, g_Lifetime[client].killsWitch, g_Lifetime[client].killsSmoker, g_Lifetime[client].killsHunter, 
@@ -3217,6 +3225,9 @@ public void Event_SurvivorRescued(Event event, const char[] name, bool dontBroad
     if (rescuer > 0 && rescuer <= MaxClients && IsClientInGame(rescuer) && GetClientTeam(rescuer) == TEAM_SURVIVOR &&
         victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR) 
     {
+        ADD_STAT(rescuer, closetRescues);
+        ADD_STAT(victim, rescuedFromCloset);
+
         char sRescuer[32], sVictim[32];
         GetPlayerNameSafe(rescuer, sRescuer, sizeof(sRescuer));
         GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
@@ -4131,6 +4142,7 @@ public Action CmdShowHistory(int client, int args)
     PrintToConsole(client, " Protections Done:   %d  (Record: %d) (Avg: %.1f)", g_Lifetime[client].protectionsTotal, g_Lifetime[client].protectionsRecord, float(g_Lifetime[client].protectionsTotal) / cp_f);
     PrintToConsole(client, " Protected by Ally:  %d  (Record: %d) (Avg: %.1f)", g_Lifetime[client].protectedByTeammate, g_Lifetime[client].protectedByTeammateRecord, float(g_Lifetime[client].protectedByTeammate) / cp_f);
 	PrintToConsole(client, " Ledge Grabs:        %d  (Avg: %.1f)  / Ledge Rescues: %d (Avg: %.1f)", g_Lifetime[client].ledgeGrabs, float(g_Lifetime[client].ledgeGrabs) / cp_f, g_Lifetime[client].ledgeRescues, float(g_Lifetime[client].ledgeRescues) / cp_f);
+	PrintToConsole(client, " Closet Rescues:     %d  (Avg: %.1f)  / Rescued from Closet: %d (Avg: %.1f)", g_Lifetime[client].closetRescues, float(g_Lifetime[client].closetRescues) / cp_f, g_Lifetime[client].rescuedFromCloset, float(g_Lifetime[client].rescuedFromCloset) / cp_f);
     PrintToConsole(client, " FF Damage Dealt:    %d  (Record: %d) (Avg: %.1f)", g_Lifetime[client].ffDamageTotal, g_Lifetime[client].ffDamageRecord, float(g_Lifetime[client].ffDamageTotal) / cp_f);
     PrintToConsole(client, " FF Damage Received: %d  (Record: %d) (Avg: %.1f)\n", g_Lifetime[client].ffReceivedTotal, g_Lifetime[client].ffReceivedRecord, float(g_Lifetime[client].ffReceivedTotal) / cp_f);
 
@@ -4297,6 +4309,7 @@ public Action CmdShowCampaignHistory(int client, int args)
     PrintToConsole(client, " Protections Done:   %d  (Record: %d) (Avg: %.1f)", g_Campaign[client].protectionsTotal, g_Campaign[client].protectionsRecord, float(g_Campaign[client].protectionsTotal) / cp_f);
     PrintToConsole(client, " Protected by Ally:  %d  (Record: %d) (Avg: %.1f)", g_Campaign[client].protectedByTeammate, g_Campaign[client].protectedByTeammateRecord, float(g_Campaign[client].protectedByTeammate) / cp_f);
 	PrintToConsole(client, " Ledge Grabs:        %d  (Avg: %.1f)  / Ledge Rescues: %d (Avg: %.1f)", g_Campaign[client].ledgeGrabs, float(g_Campaign[client].ledgeGrabs) / cp_f, g_Campaign[client].ledgeRescues, float(g_Campaign[client].ledgeRescues) / cp_f);
+	PrintToConsole(client, " Closet Rescues:     %d  (Avg: %.1f)  / Rescued from Closet: %d (Avg: %.1f)", g_Campaign[client].closetRescues, float(g_Campaign[client].closetRescues) / cp_f, g_Campaign[client].rescuedFromCloset, float(g_Campaign[client].rescuedFromCloset) / cp_f);
     PrintToConsole(client, " FF Damage Dealt:    %d  (Record: %d) (Avg: %.1f)", g_Campaign[client].ffDamageTotal, g_Campaign[client].ffDamageRecord, float(g_Campaign[client].ffDamageTotal) / cp_f);
     PrintToConsole(client, " FF Damage Received: %d  (Record: %d) (Avg: %.1f)\n", g_Campaign[client].ffReceivedTotal, g_Campaign[client].ffReceivedRecord, float(g_Campaign[client].ffReceivedTotal) / cp_f);
 
@@ -4482,6 +4495,8 @@ public Action CmdImportHistory(int client, int args)
     g_Lifetime[client].protectedByTeammateRecord = kv.GetNum("protected_by_teammate_record");
 	g_Lifetime[client].ledgeGrabs        = kv.GetNum("ledge_grabs");
     g_Lifetime[client].ledgeRescues      = kv.GetNum("ledge_rescues");
+	g_Lifetime[client].closetRescues     = kv.GetNum("closet_rescues");
+    g_Lifetime[client].rescuedFromCloset = kv.GetNum("rescued_from_closet");
     g_Lifetime[client].ffDamageTotal     = kv.GetNum("ff_damage_total");
     g_Lifetime[client].ffDamageRecord    = kv.GetNum("ff_damage_record");
     g_Lifetime[client].ffReceivedTotal   = kv.GetNum("ff_received_total");
@@ -4728,6 +4743,9 @@ void GeneratePrintFile(int client, bool isAuto)
     hFile.WriteLine(lineBuffer);
 	
 	Format(lineBuffer, sizeof(lineBuffer), "Ledge Grabs:        %d  (Avg: %.1f)  / Ledge Rescues: %d (Avg: %.1f)", g_Lifetime[client].ledgeGrabs, float(g_Lifetime[client].ledgeGrabs) / cp_f, g_Lifetime[client].ledgeRescues, float(g_Lifetime[client].ledgeRescues) / cp_f);
+    hFile.WriteLine(lineBuffer);
+	
+	Format(lineBuffer, sizeof(lineBuffer), "Closet Rescues:     %d  (Avg: %.1f)  / Rescued from Closet: %d (Avg: %.1f)", g_Lifetime[client].closetRescues, float(g_Lifetime[client].closetRescues) / cp_f, g_Lifetime[client].rescuedFromCloset, float(g_Lifetime[client].rescuedFromCloset) / cp_f);
     hFile.WriteLine(lineBuffer);
     
     Format(lineBuffer, sizeof(lineBuffer), "FF Damage Dealt:    %d  (Record: %d) (Avg: %.1f)", g_Lifetime[client].ffDamageTotal, g_Lifetime[client].ffDamageRecord, float(g_Lifetime[client].ffDamageTotal) / cp_f);
@@ -5007,6 +5025,9 @@ void GenerateCampaignPrintFile(int client)
 	Format(lineBuffer, sizeof(lineBuffer), "Ledge Grabs:        %d  (Avg: %.1f)  / Ledge Rescues: %d (Avg: %.1f)", g_Campaign[client].ledgeGrabs, float(g_Campaign[client].ledgeGrabs) / cp_f, g_Campaign[client].ledgeRescues, float(g_Campaign[client].ledgeRescues) / cp_f);
     hFile.WriteLine(lineBuffer);
 	
+	Format(lineBuffer, sizeof(lineBuffer), "Closet Rescues:     %d  (Avg: %.1f)  / Rescued from Closet: %d (Avg: %.1f)", g_Campaign[client].closetRescues, float(g_Campaign[client].closetRescues) / cp_f, g_Campaign[client].rescuedFromCloset, float(g_Campaign[client].rescuedFromCloset) / cp_f);
+    hFile.WriteLine(lineBuffer);
+	
     Format(lineBuffer, sizeof(lineBuffer), "FF Damage Dealt:    %d  (Record: %d) (Avg: %.1f)", g_Campaign[client].ffDamageTotal, g_Campaign[client].ffDamageRecord, float(g_Campaign[client].ffDamageTotal) / cp_f);
     hFile.WriteLine(lineBuffer);
 	
@@ -5190,7 +5211,10 @@ void GenerateCampaignPrintFile(int client)
             Format(lineBuffer, sizeof(lineBuffer), "  SI Breakdown:    Sm:%-3d /  Hu:%-3d /  Bo:%-3d /  Ch:%-3d /  Jo:%-3d /  Sp:%-3d", g_BotCampaign[i].killsSmoker, g_BotCampaign[i].killsHunter, g_BotCampaign[i].killsBoomer, g_BotCampaign[i].killsCharger, g_BotCampaign[i].killsJockey, g_BotCampaign[i].killsSpitter);
             hFile.WriteLine(lineBuffer);
 			
-            Format(lineBuffer, sizeof(lineBuffer), "  Teamplay Feats:  Revives:%-3d /  Heals:%-3d /  Defibs:%-3d /  Protections:%-3d /  Ledge Grabs:%-3d /  Ledge Rescues:%-3d", g_BotCampaign[i].revivesTotal, g_BotCampaign[i].medkitsUsed + g_BotCampaign[i].medkitsShared, g_BotCampaign[i].defibsUsed, g_BotCampaign[i].protectionsTotal, g_BotCampaign[i].ledgeGrabs, g_BotCampaign[i].ledgeRescues);
+            Format(lineBuffer, sizeof(lineBuffer), "  Teamplay Feats:  Revives:%-3d /  Heals:%-3d /  Defibs:%-3d /  Protections:%-3d", g_BotCampaign[i].revivesTotal, g_BotCampaign[i].medkitsUsed + g_BotCampaign[i].medkitsShared, g_BotCampaign[i].defibsUsed, g_BotCampaign[i].protectionsTotal);
+            hFile.WriteLine(lineBuffer);
+			
+            Format(lineBuffer, sizeof(lineBuffer), "                   Ledge Grabs:%-3d /  Ledge Rescues:%-3d /  Closet Rescues:%-3d /  Rescued from Closet:%-3d", g_BotCampaign[i].ledgeGrabs, g_BotCampaign[i].ledgeRescues, g_BotCampaign[i].closetRescues, g_BotCampaign[i].rescuedFromCloset);
             hFile.WriteLine(lineBuffer);
 
             Format(lineBuffer, sizeof(lineBuffer), "  Throwables:      Moly Thrown: %-2d (%-3d Kills) | Pipe Thrown: %-2d (%-3d Kills) | Bile Thrown: %-2d", g_BotCampaign[i].molotovsThrown, g_BotCampaign[i].molotovKills, g_BotCampaign[i].pipesThrown, g_BotCampaign[i].pipeKills, g_BotCampaign[i].bilesThrown);
@@ -5415,7 +5439,9 @@ public Action CmdShowBotsCampaignHistory(int client, int args)
             PrintToConsole(client, "  Playtime:        %d hours, %d minutes | Kills: %d | Incaps: %d / Deaths: %d / Restarts: %d", h, m, totalKills, g_BotCampaign[i].incaps, g_BotCampaign[i].deaths, g_BotCampaign[i].totalRestarts);
             PrintToConsole(client, "  Infected Slain:  CI: %-5d /  Total SI: %-5d (Tanks: %-3d / Witches: %-3d)", g_BotCampaign[i].killsCommon, botSI, g_BotCampaign[i].killsTank, g_BotCampaign[i].killsWitch);
             PrintToConsole(client, "  SI Breakdown:    Sm:%-3d /  Hu:%-3d /  Bo:%-3d /  Ch:%-3d /  Jo:%-3d /  Sp:%-3d", g_BotCampaign[i].killsSmoker, g_BotCampaign[i].killsHunter, g_BotCampaign[i].killsBoomer, g_BotCampaign[i].killsCharger, g_BotCampaign[i].killsJockey, g_BotCampaign[i].killsSpitter);
-            PrintToConsole(client, "  Teamplay Feats:  Revives:%-3d /  Heals:%-3d /  Defibs:%-3d /  Protections:%-3d /  Ledge Grabs:%-3d /  Ledge Rescues:%-3d", g_BotCampaign[i].revivesTotal, g_BotCampaign[i].medkitsUsed + g_BotCampaign[i].medkitsShared, g_BotCampaign[i].defibsUsed, g_BotCampaign[i].protectionsTotal, g_BotCampaign[i].ledgeGrabs, g_BotCampaign[i].ledgeRescues);
+            PrintToConsole(client, "  Teamplay Feats:  Revives:%-3d /  Heals:%-3d /  Defibs:%-3d /  Protections:%-3d", g_BotCampaign[i].revivesTotal, g_BotCampaign[i].medkitsUsed + g_BotCampaign[i].medkitsShared, g_BotCampaign[i].defibsUsed, g_BotCampaign[i].protectionsTotal);
+            PrintToConsole(client, "                   Ledge Grabs:%-3d /  Ledge Rescues:%-3d /  Closet Rescues:%-3d /  Rescued from Closet:%-3d", g_BotCampaign[i].ledgeGrabs, g_BotCampaign[i].ledgeRescues, g_BotCampaign[i].closetRescues, g_BotCampaign[i].rescuedFromCloset);
+            PrintToConsole(client, "  Throwables:      Moly Thrown: %-2d (%-3d Kills) | Pipe Thrown: %-2d (%-3d Kills) | Bile Thrown: %-2d", g_BotCampaign[i].molotovsThrown, g_BotCampaign[i].molotovKills, g_BotCampaign[i].pipesThrown, g_BotCampaign[i].pipeKills, g_BotCampaign[i].bilesThrown);
             PrintToConsole(client, "  Throwables:      Moly Thrown: %-2d (%-3d Kills) | Pipe Thrown: %-2d (%-3d Kills) | Bile Thrown: %-2d", g_BotCampaign[i].molotovsThrown, g_BotCampaign[i].molotovKills, g_BotCampaign[i].pipesThrown, g_BotCampaign[i].pipeKills, g_BotCampaign[i].bilesThrown);
             PrintToConsole(client, "  Dmg Dealt:       Tank:%-6d /  Witch:%-6d", g_BotCampaign[i].tankDamage, g_BotCampaign[i].witchDamage);
             PrintToConsole(client, "  Dmg Received:    Total:%-5d HP", GetTotalDamageReceived(g_iDamageBotCampaignCache[i]));
@@ -5564,6 +5590,8 @@ void CacheCampaignStats(int client, const char[] auth)
         g_kvCampaignCache.SetNum("protected_by_teammate_record", g_Campaign[client].protectedByTeammateRecord);
 		g_kvCampaignCache.SetNum("ledge_grabs", g_Campaign[client].ledgeGrabs);
         g_kvCampaignCache.SetNum("ledge_rescues", g_Campaign[client].ledgeRescues);
+		g_kvCampaignCache.SetNum("closet_rescues", g_Campaign[client].closetRescues);
+        g_kvCampaignCache.SetNum("rescued_from_closet", g_Campaign[client].rescuedFromCloset);
         g_kvCampaignCache.SetNum("ff_damage_total", g_Campaign[client].ffDamageTotal);
         g_kvCampaignCache.SetNum("ff_damage_record", g_Campaign[client].ffDamageRecord);
         g_kvCampaignCache.SetNum("ff_received_total", g_Campaign[client].ffReceivedTotal);
@@ -5679,6 +5707,8 @@ void RestoreCampaignStats(int client, const char[] auth)
         g_Campaign[client].protectedByTeammateRecord = g_kvCampaignCache.GetNum("protected_by_teammate_record");
 		g_Campaign[client].ledgeGrabs        = g_kvCampaignCache.GetNum("ledge_grabs");
         g_Campaign[client].ledgeRescues      = g_kvCampaignCache.GetNum("ledge_rescues");
+		g_Campaign[client].closetRescues     = g_kvCampaignCache.GetNum("closet_rescues");
+        g_Campaign[client].rescuedFromCloset = g_kvCampaignCache.GetNum("rescued_from_closet");
         g_Campaign[client].ffDamageTotal     = g_kvCampaignCache.GetNum("ff_damage_total");
         g_Campaign[client].ffDamageRecord    = g_kvCampaignCache.GetNum("ff_damage_record");
         g_Campaign[client].ffReceivedTotal   = g_kvCampaignCache.GetNum("ff_received_total");
@@ -5829,6 +5859,8 @@ bool ExportPlayerStatsToFile(int client, const char[] label)
     exportKV.SetNum("protected_by_teammate_record", g_Lifetime[client].protectedByTeammateRecord);
     exportKV.SetNum("ledge_grabs", g_Lifetime[client].ledgeGrabs);
     exportKV.SetNum("ledge_rescues", g_Lifetime[client].ledgeRescues);
+	exportKV.SetNum("closet_rescues", g_Lifetime[client].closetRescues);
+    exportKV.SetNum("rescued_from_closet", g_Lifetime[client].rescuedFromCloset);
     exportKV.SetNum("ff_damage_total", g_Lifetime[client].ffDamageTotal);
     exportKV.SetNum("ff_damage_record", g_Lifetime[client].ffDamageRecord);
     exportKV.SetNum("ff_received_total", g_Lifetime[client].ffReceivedTotal);
