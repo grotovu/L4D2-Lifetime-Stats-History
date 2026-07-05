@@ -363,6 +363,8 @@ bool g_bGnomeWon = false;
 bool g_bCarryingCola[MAXPLAYERS + 1] = { false, ... };
 bool g_bCarryingGnome[MAXPLAYERS + 1] = { false, ... };
 
+bool g_bStartingDoorOpened = false;
+
 // ====================================================================================================
 //					PLUGIN START & END
 // ====================================================================================================
@@ -465,6 +467,7 @@ public void OnPluginStart()
 	HookEvent("adrenaline_used",    Event_AdrenalineUsed);
 	HookEvent("defibrillator_used", Event_DefibUsed);
 	HookEvent("revive_success",     Event_ReviveSuccess);
+	HookEvent("survivor_rescued",   Event_SurvivorRescued);
 	HookEvent("award_earned",       Event_AwardEarned);
 	HookEvent("weapon_given", 		Event_WeaponGiven);
 	HookEvent("infected_hurt",        Event_InfectedHurt);
@@ -519,6 +522,9 @@ public void OnPluginStart()
 	
 	HookEvent("gascan_pour_completed", Event_GasCanPourCompleted);
 	HookEvent("gascan_pour_interrupted", Event_GasCanPourInterrupted);
+	
+	HookEvent("door_open", Event_DoorOpen);
+	HookEvent("door_close", Event_DoorClose);
 
 	HookEntityOutput("func_button", "OnPressed", Output_OnButtonInstant);
 	HookEntityOutput("func_button_timed", "OnPressed", Output_OnButtonStartHold);
@@ -1437,6 +1443,7 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 	g_fLastFinaleTriggerTime = 0.0;
 	
 	g_bGnomeWon = false;
+	g_bStartingDoorOpened = false;
 	
 	for (int i = 1; i <= MaxClients; i++) {
         g_bTankAlive[i] = false;
@@ -3197,6 +3204,24 @@ void Event_ReviveSuccess(Event event, const char[] name, bool dontBroadcast) {
         }
         
         g_iPreDamageHealth[subject] = GetSurvivorTotalHealth(subject);
+    }
+}
+
+public void Event_SurvivorRescued(Event event, const char[] name, bool dontBroadcast) 
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    int rescuer = GetClientOfUserId(event.GetInt("rescuer"));
+    int victim = GetClientOfUserId(event.GetInt("victim"));
+    
+    if (rescuer > 0 && rescuer <= MaxClients && IsClientInGame(rescuer) && GetClientTeam(rescuer) == TEAM_SURVIVOR &&
+        victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_SURVIVOR) 
+    {
+        char sRescuer[32], sVictim[32];
+        GetPlayerNameSafe(rescuer, sRescuer, sizeof(sRescuer));
+        GetPlayerNameSafe(victim, sVictim, sizeof(sVictim));
+        
+        LogActivity("%s opened a rescue closet and freed %s.", sRescuer, sVictim);
     }
 }
 
@@ -6550,4 +6575,61 @@ bool IsDirectHit(int attacker, int inflictor)
         if (strncmp(cls, "weapon_", 7) == 0 || strncmp(cls, "prop_minigun", 12) == 0 || strncmp(cls, "prop_mounted", 12) == 0) return true;
     }
     return false;
+}
+
+// ====================================================================================================
+//                  CHECKPOINT DOOR SPECIFIC EVENTS
+// ====================================================================================================
+void Event_DoorOpen(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    bool isCheckpoint = event.GetBool("checkpoint");
+    if (!isCheckpoint) return;
+
+    if (!g_bStartingDoorOpened)
+    {
+        int client = GetClientOfUserId(event.GetInt("userid"));
+        if (client > 0 && IsClientInGame(client) && GetClientTeam(client) == TEAM_SURVIVOR)
+        {
+            g_bStartingDoorOpened = true;
+            char sName[32];
+            GetPlayerNameSafe(client, sName, sizeof(sName));
+            LogActivity("%s opened the starting checkpoint door.", sName);
+        }
+    }
+}
+
+void Event_DoorClose(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!g_cvEnable.BoolValue) return;
+
+    bool isCheckpoint = event.GetBool("checkpoint");
+    if (!isCheckpoint) return;
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client <= 0 || !IsClientInGame(client) || GetClientTeam(client) != TEAM_SURVIVOR) return;
+
+    bool allInside = true;
+    int aliveCount = 0;
+    
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR && IsPlayerAlive(i))
+        {
+            aliveCount++;
+            if (!L4D_IsInLastCheckpoint(i))
+            {
+                allInside = false;
+                break;
+            }
+        }
+    }
+
+    if (aliveCount > 0 && allInside)
+    {
+        char sName[32];
+        GetPlayerNameSafe(client, sName, sizeof(sName));
+        LogActivity("%s closed the ending checkpoint door.", sName);
+    }
 }
