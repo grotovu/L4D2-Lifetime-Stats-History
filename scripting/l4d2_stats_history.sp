@@ -356,6 +356,9 @@ int g_iAccumulatedDamage[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 int g_iPreAccumHealth[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 Handle g_hDamageTimer[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 
+int g_iLastPropAttacker[MAX_ENTITIES_TRACKED] = { 0, ... };
+bool g_bPropExploded[MAX_ENTITIES_TRACKED] = { false, ... };
+
 // ====================================================================================================
 //					PLUGIN START & END
 // ====================================================================================================
@@ -528,6 +531,14 @@ public void OnPluginStart()
 	
 	HookEntityOutput("point_prop_use_target", "OnUseFinished", Output_OnUseFinished);
 	HookEntityOutput("point_script_use_target", "OnUseFinished", Output_OnUseFinished);
+	
+	HookEntityOutput("prop_physics", "OnBreak", Output_OnPropBreak);
+	HookEntityOutput("prop_fuel_barrel", "OnBreak", Output_OnPropBreak);
+	
+	HookEntityOutput("weapon_gascan", "OnKilled", Output_OnGasCanKilled);
+	HookEntityOutput("weapon_propanetank", "OnKilled", Output_OnPropBreak);
+	HookEntityOutput("weapon_oxygentank", "OnKilled", Output_OnPropBreak);
+	HookEntityOutput("weapon_fireworkcrate", "OnKilled", Output_OnPropBreak);
 	
 	UserMsg pzDmgMsg = GetUserMessageId("PZDmgMsg");
     if (pzDmgMsg != INVALID_MESSAGE_ID) {
@@ -1436,6 +1447,7 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 		g_fLastButtonCancelTime[i] = 0.0;
 		g_fCarryEndTime[i] = 0.0;
 		g_fLastSpitEntryTime[i] = 0.0;
+		g_bPropExploded[i] = false;
     }
 	for (int i = 1; i <= MaxClients; i++) {
 		g_bIsPressingButton[i] = false;
@@ -2361,6 +2373,23 @@ public void OnEntityCreated(int entity, const char[] classname)
             }
         }
     }
+	
+	if (entity > 0 && entity < MAX_ENTITIES_TRACKED)
+	{
+		g_bPropExploded[entity] = false;
+		
+		if (strcmp(classname, "prop_physics") == 0 ||
+			strcmp(classname, "physics_prop") == 0 ||
+			strcmp(classname, "prop_fuel_barrel") == 0 ||
+			strcmp(classname, "weapon_gascan") == 0 ||
+			strcmp(classname, "weapon_propanetank") == 0 ||
+			strcmp(classname, "weapon_oxygentank") == 0 ||
+			strcmp(classname, "weapon_fireworkcrate") == 0)
+		{
+			SDKHook(entity, SDKHook_OnTakeDamage, OnExplodableTakeDamage);
+			g_iLastPropAttacker[entity] = 0;
+		}
+	}
 }
 
 public void OnEntityDestroyed(int entity)
@@ -2371,6 +2400,9 @@ public void OnEntityDestroyed(int entity)
         g_iWitchFirstHitTick[entity] = 0;
         g_bIsWitchHeadshot[entity] = false;
         g_bIsWitchEntity[entity] = false;
+		
+		g_bPropExploded[entity] = false;
+		g_iLastPropAttacker[entity] = 0;
 		
 		for (int i = 1; i <= MaxClients; i++) {
             g_iDamageToWitch[entity][i] = 0;
@@ -6385,4 +6417,117 @@ public void Output_ColaBuyerFinished(const char[] output, int caller, int activa
     {
         LogActivity("The Cola Bottles were successfully delivered to Whitaker!");
     }
+}
+
+// ====================================================================================================
+//                  PROP BREAKING SPECIFIC FUNCTIONS
+// ====================================================================================================
+public Action OnExplodableTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damageCustom)
+{
+    if (victim <= 0 || victim >= MAX_ENTITIES_TRACKED) return Plugin_Continue;
+    if (g_bPropExploded[victim]) return Plugin_Continue;
+
+    if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
+    {
+        g_iLastPropAttacker[victim] = attacker;
+    }
+
+    int health = GetEntProp(victim, Prop_Data, "m_iHealth");
+    if (damage >= float(health))
+    {
+        bool bDirect = IsDirectHit(attacker, inflictor);
+        HandleExplosion(victim, attacker, bDirect);
+    }
+
+    return Plugin_Continue;
+}
+
+public void Output_OnPropBreak(const char[] output, int caller, int activator, float delay)
+{
+    HandleExplosion(caller, activator);
+}
+
+public void Output_OnGasCanKilled(const char[] output, int caller, int activator, float delay)
+{
+    HandleExplosion(caller, activator);
+}
+
+void HandleExplosion(int entity, int activator, bool bDirect = false)
+{
+    if (entity <= 0 || entity >= MAX_ENTITIES_TRACKED) return;
+    if (g_bPropExploded[entity]) return;
+    g_bPropExploded[entity] = true;
+
+    int attacker = activator;
+    if (attacker <= 0 || attacker > MaxClients || !IsClientInGame(attacker))
+    {
+        attacker = g_iLastPropAttacker[entity];
+    }
+
+    char sModel[PLATFORM_MAX_PATH];
+    GetEntPropString(entity, Prop_Data, "m_ModelName", sModel, sizeof(sModel));
+    StringToLowerCase(sModel);
+
+    if (StrContains(sModel, "piece") != -1 || StrContains(sModel, "gib") != -1 || StrContains(sModel, "part") != -1)
+    {
+        return;
+    }
+
+    char sPropName[32] = "unknown explodable";
+    
+    if (StrContains(sModel, "gascan") != -1) strcopy(sPropName, sizeof(sPropName), "Gas Can");
+    else if (StrContains(sModel, "propane") != -1) strcopy(sPropName, sizeof(sPropName), "Propane Tank");
+    else if (StrContains(sModel, "oxygen") != -1) strcopy(sPropName, sizeof(sPropName), "Oxygen Tank");
+    else if (StrContains(sModel, "firework") != -1 || StrContains(sModel, "explosive_box") != -1) strcopy(sPropName, sizeof(sPropName), "Fireworks Crate");
+    else if (StrContains(sModel, "barrel_fuel") != -1) strcopy(sPropName, sizeof(sPropName), "Explosive Barrel");
+    else 
+    {
+        char sClass[64];
+        GetEntityClassname(entity, sClass, sizeof(sClass));
+        StringToLowerCase(sClass);
+        
+        if (strcmp(sClass, "prop_fuel_barrel") == 0) strcopy(sPropName, sizeof(sPropName), "Explosive Barrel");
+        else if (strcmp(sClass, "weapon_gascan") == 0) strcopy(sPropName, sizeof(sPropName), "Gas Can");
+        else if (strcmp(sClass, "weapon_propanetank") == 0) strcopy(sPropName, sizeof(sPropName), "Propane Tank");
+        else if (strcmp(sClass, "weapon_oxygentank") == 0) strcopy(sPropName, sizeof(sPropName), "Oxygen Tank");
+        else if (strcmp(sClass, "weapon_fireworkcrate") == 0) strcopy(sPropName, sizeof(sPropName), "Fireworks Crate");
+        else return;
+    }
+
+    if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker))
+    {
+        char sAttackerName[32];
+        GetPlayerNameSafe(attacker, sAttackerName, sizeof(sAttackerName));
+        
+        if (!bDirect)
+        {
+            LogActivity("%s triggered a chain reaction exploding a %s.", sAttackerName, sPropName);
+        }
+        else
+        {
+            LogActivity("%s combusted a %s.", sAttackerName, sPropName);
+        }
+    }
+    else
+    {
+        LogActivity("A %s exploded (chain reaction or environmental).", sPropName);
+    }
+
+    g_iLastPropAttacker[entity] = 0;
+}
+
+bool IsDirectHit(int attacker, int inflictor)
+{
+    if (attacker <= 0 || attacker > MaxClients || !IsClientInGame(attacker)) return false;
+
+    if (inflictor == attacker) return true;
+    if (inflictor > 0 && inflictor <= MaxClients) return true;
+    
+    if (inflictor > MaxClients && IsValidEntity(inflictor))
+    {
+        char cls[64];
+        GetEntityClassname(inflictor, cls, sizeof(cls));
+        if (strncmp(cls, "weapon_", 7) == 0 || strncmp(cls, "prop_minigun", 12) == 0 || strncmp(cls, "prop_mounted", 12) == 0) return true;
+    }
+    return false;
 }
