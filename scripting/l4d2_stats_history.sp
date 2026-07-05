@@ -359,6 +359,10 @@ Handle g_hDamageTimer[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 int g_iLastPropAttacker[MAX_ENTITIES_TRACKED] = { 0, ... };
 bool g_bPropExploded[MAX_ENTITIES_TRACKED] = { false, ... };
 
+bool g_bGnomeWon = false;
+bool g_bCarryingCola[MAXPLAYERS + 1] = { false, ... };
+bool g_bCarryingGnome[MAXPLAYERS + 1] = { false, ... };
+
 // ====================================================================================================
 //					PLUGIN START & END
 // ====================================================================================================
@@ -515,10 +519,6 @@ public void OnPluginStart()
 	
 	HookEvent("gascan_pour_completed", Event_GasCanPourCompleted);
 	HookEvent("gascan_pour_interrupted", Event_GasCanPourInterrupted);
-	
-	HookEvent("item_pickup", Event_ItemPickup);
-	HookEvent("weapon_drop", Event_WeaponDrop);
-	HookEvent("weapon_drop_to_prop", Event_WeaponDrop);
 
 	HookEntityOutput("func_button", "OnPressed", Output_OnButtonInstant);
 	HookEntityOutput("func_button_timed", "OnPressed", Output_OnButtonStartHold);
@@ -951,6 +951,8 @@ public void OnClientDisconnect(int client)
 	g_bTongueCutThisFrame[client] = false;
 	g_bPinResolutionLogged[client] = false;
 	g_bSpitterHasSpit[client] = false;
+	g_bCarryingCola[client] = false;
+    g_bCarryingGnome[client] = false;
 	
 	FlushKillsCache(client);
 	
@@ -1434,6 +1436,8 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 	g_iCansPoured = 0;
 	g_fLastFinaleTriggerTime = 0.0;
 	
+	g_bGnomeWon = false;
+	
 	for (int i = 1; i <= MaxClients; i++) {
         g_bTankAlive[i] = false;
         g_bTankBurnt[i] = false;
@@ -1448,6 +1452,8 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
 		g_fCarryEndTime[i] = 0.0;
 		g_fLastSpitEntryTime[i] = 0.0;
 		g_bPropExploded[i] = false;
+		g_bCarryingCola[i] = false;
+        g_bCarryingGnome[i] = false;
     }
 	for (int i = 1; i <= MaxClients; i++) {
 		g_bIsPressingButton[i] = false;
@@ -2356,6 +2362,21 @@ public void OnEntityCreated(int entity, const char[] classname)
             g_bIsCommonEntity[entity] = true;
         }
     }
+	
+	if (strcmp(classname, "weapon_gnome") == 0)
+    {
+        if (!g_bGnomeWon)
+        {
+            char mapName[64];
+            GetCurrentMap(mapName, sizeof(mapName));
+
+            if (StrContains(mapName, "c2m2", false) != -1)
+            {
+                LogActivity("The team won Gnome Chompski at the Shooting Gallery!");
+                g_bGnomeWon = true;
+            }
+        }
+    }
 
     if (classname[0] == 'w' && StrEqual(classname, "witch"))
     {
@@ -2785,16 +2806,52 @@ void Event_PlayerReplacedBot(Event event, const char[] name, bool dontBroadcast)
 
 public void OnWeaponSwitchPost(int client, int weapon)
 {
-    if (client <= 0 || !IsClientInGame(client) || weapon <= 0 || !IsValidEntity(weapon)) {
+    if (client <= 0 || client > MaxClients || !IsClientInGame(client)) return;
+
+    bool bValidWeapon = false;
+    char clsName[64];
+    clsName[0] = '\0';
+
+    if (weapon > 0 && IsValidEntity(weapon))
+    {
+        bValidWeapon = true;
+        GetEntityClassname(weapon, clsName, sizeof(clsName));
+    }
+
+    if (g_bCarryingCola[client] && (!bValidWeapon || StrContains(clsName, "cola_bottles", false) == -1)) {
+        g_bCarryingCola[client] = false;
+        char sPlayerName[32];
+        GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+        LogActivity("%s dropped the Cola Bottles.", sPlayerName);
+    }
+    else if (g_bCarryingGnome[client] && (!bValidWeapon || StrContains(clsName, "gnome", false) == -1)) {
+        g_bCarryingGnome[client] = false;
+        char sPlayerName[32];
+        GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+        LogActivity("%s dropped the Gnome.", sPlayerName);
+    }
+
+    if (!bValidWeapon) {
         g_iClientActiveWeaponID[client] = -1;
         return;
     }
-	
-	g_sLastRawWeapon[client][0] = '\0';
 
-    char clsName[64], clean[64];
-    GetEntityClassname(weapon, clsName, sizeof(clsName));
+    if (StrContains(clsName, "cola_bottles", false) != -1 && !g_bCarryingCola[client]) {
+        g_bCarryingCola[client] = true;
+        char sPlayerName[32];
+        GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+        LogActivity("%s picked up the Cola Bottles.", sPlayerName);
+    }
+    else if (StrContains(clsName, "gnome", false) != -1 && !g_bCarryingGnome[client]) {
+        g_bCarryingGnome[client] = true;
+        char sPlayerName[32];
+        GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
+        LogActivity("%s picked up the Gnome.", sPlayerName);
+    }
 
+    g_sLastRawWeapon[client][0] = '\0';
+    
+    char clean[64];
     GetCleanWeaponName(client, clsName, clean, sizeof(clean), weapon);
 
     int id;
@@ -6075,43 +6132,6 @@ public void Event_GasCanPourInterrupted(Event event, const char[] name, bool don
     GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
 
     LogActivity("%s's gas can pouring was interrupted.", sPlayerName);
-}
-
-public void Event_ItemPickup(Event event, const char[] name, bool dontBroadcast)
-{
-    if (!g_cvEnable.BoolValue) return;
-
-    char item[64];
-    event.GetString("item", item, sizeof(item));
-
-    if (StrContains(item, "cola_bottles", false) != -1)
-    {
-        int client = GetClientOfUserId(event.GetInt("userid"));
-        if (client > 0 && IsClientInGame(client))
-        {
-            char sPlayerName[32];
-            GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
-            LogActivity("%s picked up the Cola Bottles.", sPlayerName);
-        }
-    }
-}
-
-public void Event_WeaponDrop(Event event, const char[] name, bool dontBroadcast)
-{
-    if (!g_cvEnable.BoolValue) return;
-
-    char item[64];
-    event.GetString("item", item, sizeof(item));
-    if (StrContains(item, "cola_bottles", false) != -1)
-    {
-        int client = GetClientOfUserId(event.GetInt("userid"));
-        if (client > 0 && IsClientInGame(client))
-        {
-            char sPlayerName[32];
-            GetPlayerNameSafe(client, sPlayerName, sizeof(sPlayerName));
-            LogActivity("%s dropped the Cola Bottles.", sPlayerName);
-        }
-    }
 }
 
 public void Output_OnButtonInstant(const char[] output, int caller, int activator, float delay)
