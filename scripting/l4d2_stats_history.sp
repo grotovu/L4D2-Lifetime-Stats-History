@@ -823,13 +823,13 @@ public Action Timer_SecondTicker(Handle timer)
         if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR) { 
             ADD_STAT(i, totalSeconds);
             
-            if (!IsFakeClient(i) && !L4D_IsSurvivalMode() && !StrEqual(g_sPlayerLastCampaignID[i], g_sCurrentCampaignID)) {
-                ADD_STAT(i, campaignsPlayed);
-                strcopy(g_sPlayerLastCampaignID[i], sizeof(g_sPlayerLastCampaignID[]), g_sCurrentCampaignID);
-                if (g_sAuthID[i][0] != '\0') {
-                    g_smPlayerLastCampaign.SetString(g_sAuthID[i], g_sCurrentCampaignID);
-                }
-            }
+            if (!IsFakeClient(i) && g_bStatsLoaded[i] && !L4D_IsSurvivalMode() && !StrEqual(g_sPlayerLastCampaignID[i], g_sCurrentCampaignID)) {
+				ADD_STAT(i, campaignsPlayed);
+				strcopy(g_sPlayerLastCampaignID[i], sizeof(g_sPlayerLastCampaignID[]), g_sCurrentCampaignID);
+				if (g_sAuthID[i][0] != '\0') {
+					g_smPlayerLastCampaign.SetString(g_sAuthID[i], g_sCurrentCampaignID);
+				}
+			}		
 
             if (IsPlayerAlive(i) && !L4D_IsPlayerIncapacitated(i)) {
                 bool isBW = view_as<bool>(GetEntProp(i, Prop_Send, "m_bIsOnThirdStrike"));
@@ -1540,13 +1540,13 @@ void Event_FinaleWin(Event event, const char[] name, bool dontBroadcast) {
     for (int i = 1; i <= MaxClients; i++) {
         if (IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR) {
             
-            if (!IsFakeClient(i) && !StrEqual(g_sPlayerLastCampaignID[i], g_sCurrentCampaignID)) {
-                ADD_STAT(i, campaignsPlayed);
-                strcopy(g_sPlayerLastCampaignID[i], sizeof(g_sPlayerLastCampaignID[]), g_sCurrentCampaignID);
-                if (g_sAuthID[i][0] != '\0') {
-                    g_smPlayerLastCampaign.SetString(g_sAuthID[i], g_sCurrentCampaignID);
-                }
-            }
+            if (!IsFakeClient(i) && g_bStatsLoaded[i] && !StrEqual(g_sPlayerLastCampaignID[i], g_sCurrentCampaignID)) {
+				ADD_STAT(i, campaignsPlayed);
+				strcopy(g_sPlayerLastCampaignID[i], sizeof(g_sPlayerLastCampaignID[]), g_sCurrentCampaignID);
+				if (g_sAuthID[i][0] != '\0') {
+					g_smPlayerLastCampaign.SetString(g_sAuthID[i], g_sCurrentCampaignID);
+				}
+			}		
 
             if (IsPlayerEscaped(i)) {
                 ADD_STAT(i, campaignsWon);
@@ -4199,7 +4199,7 @@ public Action CmdShowHistory(int client, int args)
         char key[64];
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
 		
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
 		
         totalKills += wS.kills;
 
@@ -4304,7 +4304,7 @@ public Action CmdShowHistory(int client, int args)
 			wS = g_WeaponLifetimeCache[client][i];
 			char key[64];
 			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
 			if (wS.fired == 0 && wS.kills == 0) continue;
 			GetPrettyWeaponName(key, buf, sizeof(buf));
 			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
@@ -4366,7 +4366,7 @@ public Action CmdShowCampaignHistory(int client, int args)
         char key[64];
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
 		
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
 		
         totalKills += wS.kills;
 
@@ -4471,7 +4471,7 @@ public Action CmdShowCampaignHistory(int client, int args)
 			wS = g_WeaponCampaignCache[client][i];
 			char key[64];
 			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
 			if (wS.fired == 0 && wS.kills == 0) continue;
 			GetPrettyWeaponName(key, buf, sizeof(buf));
 			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
@@ -4762,7 +4762,7 @@ void GeneratePrintFile(int client, bool isAuto)
         char key[64];
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
         
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
          
         totalKills += wS.kills;
 
@@ -4961,7 +4961,7 @@ void GeneratePrintFile(int client, bool isAuto)
 			wS = g_WeaponLifetimeCache[client][i];
 			char key[64];
 			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
 			if (wS.fired == 0 && wS.kills == 0) continue;
 			GetPrettyWeaponName(key, buf, sizeof(buf));
 			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
@@ -5039,7 +5039,7 @@ void GenerateCampaignPrintFile(int client)
         char key[64];
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
 		
-        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+        if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
 		 
         totalKills += wS.kills;
 
@@ -5244,7 +5244,7 @@ void GenerateCampaignPrintFile(int client)
 			wS = g_WeaponCampaignCache[client][i];
 			char key[64];
 			strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
-			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+			if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
 			if (wS.fired == 0 && wS.kills == 0) continue;
 			GetPrettyWeaponName(key, buf, sizeof(buf));
 			float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
@@ -5302,7 +5302,7 @@ void GenerateCampaignPrintFile(int client)
                 wS = g_WeaponBotCampaignCache[i][w];
                 char key[64];
                 strcopy(key, sizeof(key), g_sCleanWeaponNames[w]);
-                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
                 botTotalKills += wS.kills;
             }
 			
@@ -5350,7 +5350,7 @@ void GenerateCampaignPrintFile(int client)
                 char key[64], prettyWPN[64];
                 strcopy(key, sizeof(key), g_sCleanWeaponNames[w]);
                 if (wS.kills == 0 && wS.fired == 0) continue;
-                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
                 GetPrettyWeaponName(key, prettyWPN, sizeof(prettyWPN));
 
                 float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
@@ -5538,7 +5538,7 @@ public Action CmdShowBotsCampaignHistory(int client, int args)
                 wS = g_WeaponBotCampaignCache[i][w];
                 char key[64];
                 strcopy(key, sizeof(key), g_sCleanWeaponNames[w]);
-                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
                 totalKills += wS.kills;
             }
 
@@ -5568,7 +5568,7 @@ public Action CmdShowBotsCampaignHistory(int client, int args)
                 char key[64], prettyWPN[64];
                 strcopy(key, sizeof(key), g_sCleanWeaponNames[w]);
                 if (wS.kills == 0 && wS.fired == 0) continue;
-                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "molotov") || IsCarryableObject(key)) continue;
+                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
                 GetPrettyWeaponName(key, prettyWPN, sizeof(prettyWPN));
 
                 float acc = (wS.fired > 0) ? (float(wS.hits) / float(wS.fired)) * 100.0 : 0.0;
