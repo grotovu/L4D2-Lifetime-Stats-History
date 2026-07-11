@@ -444,10 +444,11 @@ public void OnPluginStart()
 	}
 	
 	for (int i = 1; i <= MaxClients; i++) {
-		if (IsClientInGame(i)) {
-			OnClientPostAdminCheck(i);
-		}
-	}
+        if (IsClientInGame(i)) {
+            OnClientPutInServer(i);
+            OnClientPostAdminCheck(i);
+        }
+    }
 
 	RegAdminCmd("sm_resetstatshistory", CmdResetHistory, ADMFLAG_ROOT);
 	RegAdminCmd("sm_savestatshistory", CmdSaveHistory, ADMFLAG_ROOT, "Saves all currently loaded player stats to the database.");
@@ -2084,6 +2085,8 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                     }
                     
                     bIsSpecialFeat = true;
+					
+					g_bPinResolutionLogged[pinnedSurvivor] = true; 
                     
                     if (!IsFakeClient(pinnedSurvivor))
                     {
@@ -2104,6 +2107,8 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                         LogActivity("%s self-rescued by killing the Smoker with %s%s%s.", sName, prettyWPN, sDistance, sBreakdown);
                         
                         bIsSpecialFeat = true;
+						
+						g_bPinResolutionLogged[pinnedSurvivor] = true; 
                     }
                 }
             }
@@ -3495,30 +3500,15 @@ public Action Timer_ResolvePinStop(Handle timer, DataPack pack)
 
     if (victim <= 0 || !IsClientInGame(victim)) return Plugin_Stop;
 
+    if (g_bPinResolutionLogged[victim]) return Plugin_Stop;
+
     if (g_bTongueCutThisFrame[victim]) {
         g_bTongueCutThisFrame[victim] = false;
+        g_bPinResolutionLogged[victim] = true;
         return Plugin_Stop;
     }
 
     if (g_iPinnedBy[victim] == attacker) return Plugin_Stop;
-
-    if (attacker <= 0 || !IsClientInGame(attacker) || !IsPlayerAlive(attacker) || GetClientHealth(attacker) <= 0)
-    {
-        return Plugin_Stop;
-    }
-
-    if (rescuer <= 0 || !IsClientInGame(rescuer))
-    {
-        float pinEndTime = g_fPinEndTime[victim];
-        if (attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && g_iLastShover[attacker] > 0 && IsClientInGame(g_iLastShover[attacker]))
-        {
-            float diff = g_fLastShoveTime[attacker] - pinEndTime;
-            if (diff >= -0.2 && diff < 0.8)
-            {
-                rescuer = g_iLastShover[attacker];
-            }
-        }
-    }
 
     int zombieClass = 0;
     if (attacker > 0 && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_INFECTED) {
@@ -6210,7 +6200,7 @@ void LogActivity(const char[] format, any...)
 {
     if (!g_cvEnable.BoolValue || !g_cvActivityLogsEnable.BoolValue) return;
 
-    char buffer[256];
+    char buffer[512];
     VFormat(buffer, sizeof(buffer), format, 2);
 
     int h = g_iCampaignTime / 3600;
