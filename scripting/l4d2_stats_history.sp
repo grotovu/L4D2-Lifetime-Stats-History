@@ -364,6 +364,9 @@ int g_iAccumulatedDamage[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 int g_iPreAccumHealth[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 Handle g_hDamageTimer[MAXPLAYERS + 1][MAX_DMG_SOURCES];
 
+int g_iDamageToSI[MAXPLAYERS + 1][MAXPLAYERS + 1];
+int g_iSIWeaponID[MAXPLAYERS + 1][MAXPLAYERS + 1];
+
 int g_iLastPropAttacker[MAX_ENTITIES_TRACKED] = { 0, ... };
 bool g_bPropExploded[MAX_ENTITIES_TRACKED] = { false, ... };
 
@@ -1397,6 +1400,10 @@ public void OnMapStart()
         g_hActivityLog.Clear();
     }
 	
+	if (g_hActivityLog != null && g_hActivityLog.Length > 0) {
+        g_hActivityLog.PushString("");
+    }
+	
     if (g_hSecondTimer != null) {
         KillTimer(g_hSecondTimer);
         g_hSecondTimer = null;
@@ -1486,6 +1493,13 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast) {
         g_iWitchDamageAwarded[w] = 0;
         g_bWitchBurnt[w] = false;
 		g_bWitchDamagedByNonMelee[w] = false;
+    }
+	
+	for (int v = 1; v <= MaxClients; v++) {
+        for (int a = 1; a <= MaxClients; a++) {
+            g_iDamageToSI[v][a] = 0;
+            g_iSIWeaponID[v][a] = -1;
+        }
     }
 }
 
@@ -1877,7 +1891,17 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast) {
         }
     }    
     else if (victimTeam == TEAM_INFECTED) {
-        if (GetEntProp(victim, Prop_Send, "m_zombieClass") == 8)
+        int zombieClass = GetEntProp(victim, Prop_Send, "m_zombieClass");
+		
+		if (zombieClass >= 1 && zombieClass <= 6) {
+            int dmg = event.GetInt("dmg_health");
+            if (dmg > 0 && IsSurvivor(attacker)) {
+                g_iDamageToSI[victim][attacker] += dmg;
+                g_iSIWeaponID[victim][attacker] = g_iClientActiveWeaponID[attacker];
+            }
+        }
+		
+		if (zombieClass == 8)
         {
             if (g_bTankAlive[victim])
             {
@@ -1932,6 +1956,15 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
 	
 	char weapon[64], clean[64];
     bool bIsSpecialFeat = false;
+	
+	char sBreakdown[512];
+    sBreakdown[0] = '\0';
+    if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && GetClientTeam(victim) == TEAM_INFECTED) {
+        int zClass = GetEntProp(victim, Prop_Send, "m_zombieClass");
+        if (zClass >= 1 && zClass <= 6 && attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker) && GetClientTeam(attacker) == TEAM_SURVIVOR) {
+            GetSIDamageBreakdown(victim, attacker, sBreakdown, sizeof(sBreakdown));
+        }
+    }
 	
 	event.GetString("weapon", weapon, sizeof(weapon));
     if (attacker > 0 && IsClientInGame(attacker)) {
@@ -2031,9 +2064,9 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                     }
                     
                     if (event.GetBool("headshot")) {
-                        LogActivity("%s saved %s by killing the %s with %s (Headshot).", sRescuer, sVictim, sInfected, prettyWPN);
+                        LogActivity("%s saved %s by killing the %s with %s (Headshot)%s.", sRescuer, sVictim, sInfected, prettyWPN, sBreakdown);
                     } else {
-                        LogActivity("%s saved %s by killing the %s with %s.", sRescuer, sVictim, sInfected, prettyWPN);
+                        LogActivity("%s saved %s by killing the %s with %s%s.", sRescuer, sVictim, sInfected, prettyWPN, sBreakdown);
                     }
                     
                     bIsSpecialFeat = true;
@@ -2054,7 +2087,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                         char sName[32], prettyWPN[64];
                         GetPlayerNameSafe(rescuer, sName, sizeof(sName));
                         GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-                        LogActivity("%s self-rescued by killing the Smoker with %s.", sName, prettyWPN);
+                        LogActivity("%s self-rescued by killing the Smoker with %s%s.", sName, prettyWPN, sBreakdown);
                         
                         bIsSpecialFeat = true;
                     }
@@ -2100,19 +2133,19 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                     UpdateWeaponStat(attacker, clean, 20);
                     
                     if (isHeadshot) {
-                        LogActivity("%s killed a Spitter before she could spit with %s (Headshot).", sAttacker, prettyWPN);
+                        LogActivity("%s killed a Spitter before she could spit with %s (Headshot)%s.", sAttacker, prettyWPN, sBreakdown);
                     } else {
-                        LogActivity("%s killed a Spitter before she could spit with %s.", sAttacker, prettyWPN);
+                        LogActivity("%s killed a Spitter before she could spit with %s%s.", sAttacker, prettyWPN, sBreakdown);
                     }
                 } else {
                     if (isHeadshot) {
-                        LogActivity("%s killed %s (Spitter) with %s (Headshot).", sAttacker, sVictim, prettyWPN);
+                        LogActivity("%s killed %s (Spitter) with %s (Headshot)%s.", sAttacker, sVictim, prettyWPN, sBreakdown);
                     } else {
-                        LogActivity("%s killed %s (Spitter) with %s.", sAttacker, sVictim, prettyWPN);
+                        LogActivity("%s killed %s (Spitter) with %s%s.", sAttacker, sVictim, prettyWPN, sBreakdown);
                     }
                 }
             }
-			else {
+            else {
                 switch (zombieClass) {
                     case 1: strcopy(sInfected, sizeof(sInfected), "Smoker");
                     case 2: strcopy(sInfected, sizeof(sInfected), "Boomer");
@@ -2122,9 +2155,9 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 }
 
                 if (isHeadshot) {
-                    LogActivity("%s killed %s (%s) with %s (Headshot).", sAttacker, sVictim, sInfected, prettyWPN);
+                    LogActivity("%s killed %s (%s) with %s (Headshot)%s.", sAttacker, sVictim, sInfected, prettyWPN, sBreakdown);
                 } else {
-                    LogActivity("%s killed %s (%s) with %s.", sAttacker, sVictim, sInfected, prettyWPN);
+                    LogActivity("%s killed %s (%s) with %s%s.", sAttacker, sVictim, sInfected, prettyWPN, sBreakdown);
                 }
             }
         }
@@ -2153,7 +2186,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 char sAttacker[32], prettyWPN[64];
                 GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
                 GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-                LogActivity("%s skeeted a Hunter with %s.", sAttacker, prettyWPN);
+                LogActivity("%s skeeted a Hunter with %s%s.", sAttacker, prettyWPN, sBreakdown);
             }
         }
         case 4: 
@@ -2178,7 +2211,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 char sAttacker[32], prettyWPN[64];
                 GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
                 GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-                LogActivity("%s leveled a Charger with %s.", sAttacker, prettyWPN);
+                LogActivity("%s leveled a Charger with %s%s.", sAttacker, prettyWPN, sBreakdown);
             }
         }
         case 8: 
@@ -2194,6 +2227,13 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
     }
 	
     g_iPendingSkeetAttacker[victim] = 0;
+	
+	if (victim > 0 && victim <= MaxClients) {
+        for (int i = 1; i <= MaxClients; i++) {
+            g_iDamageToSI[victim][i] = 0;
+            g_iSIWeaponID[victim][i] = -1;
+        }
+    }	
 }
 
 void Event_PlayerIncapacitated(Event event, const char[] name, bool dontBroadcast) {
@@ -2833,6 +2873,12 @@ void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast) {
 		g_bTankBurnt[client] = false;
 		g_iTankLastHealth[client] = GetEntProp(client, Prop_Data, "m_iMaxHealth");
 	}
+	
+	for (int a = 1; a <= MaxClients; a++) {
+        g_iDamageToSI[client][a] = 0;
+        g_iSIWeaponID[client][a] = -1;
+    }
+	
 	UpdateClientCacheDelayed(client);
 }
 
@@ -6780,5 +6826,48 @@ void Event_DoorClose(Event event, const char[] name, bool dontBroadcast)
         char sName[32];
         GetPlayerNameSafe(client, sName, sizeof(sName));
         LogActivity("%s closed the ending checkpoint door.", sName);
+    }
+}
+
+// ====================================================================================================
+//                  SI SURVIVOR AND WEAPON DAMAGE BREAKDOWN
+// ====================================================================================================
+
+void GetSIDamageBreakdown(int victim, int killer, char[] buffer, int maxlen)
+{
+    buffer[0] = '\0';
+    char assistBuf[384];
+    assistBuf[0] = '\0';
+    
+    int killerDmg = g_iDamageToSI[victim][killer];
+    
+    for (int i = 1; i <= MaxClients; i++) {
+        if (i != killer && IsClientInGame(i) && GetClientTeam(i) == TEAM_SURVIVOR) {
+            int dmg = g_iDamageToSI[victim][i];
+            if (dmg > 0) {
+                char name[32], wpnName[32], prettyWpn[32];
+                GetPlayerNameSafe(i, name, sizeof(name));
+                
+                int wpnID = g_iSIWeaponID[victim][i];
+                if (wpnID >= 0 && wpnID < 128) {
+                    strcopy(wpnName, sizeof(wpnName), g_sCleanWeaponNames[wpnID]);
+                    GetPrettyWeaponName(wpnName, prettyWpn, sizeof(prettyWpn));
+                } else {
+                    strcopy(prettyWpn, sizeof(prettyWpn), "Unknown");
+                }
+                
+                if (assistBuf[0] == '\0') {
+                    Format(assistBuf, sizeof(assistBuf), "%s: %d dmg with %s", name, dmg, prettyWpn);
+                } else {
+                    Format(assistBuf, sizeof(assistBuf), "%s, %s: %d dmg with %s", assistBuf, name, dmg, prettyWpn);
+                }
+            }
+        }
+    }
+    
+    if (assistBuf[0] != '\0') {
+        Format(buffer, maxlen, " (Dealt %d dmg | Assist: %s)", killerDmg, assistBuf);
+    } else {
+        Format(buffer, maxlen, " (Dealt %d dmg)", killerDmg);
     }
 }
