@@ -1966,6 +1966,9 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
         }
     }
 	
+	char sWallbang[16];
+    sWallbang[0] = '\0';
+	
 	event.GetString("weapon", weapon, sizeof(weapon));
     if (attacker > 0 && IsClientInGame(attacker)) {
         int tick = GetGameTickCount();
@@ -2124,6 +2127,10 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
 
             bool isHeadshot = event.GetBool("headshot");
 
+            if (IsGun(clean) && IsWallbangKill(attacker, victim)) {
+                strcopy(sWallbang, sizeof(sWallbang), " (Wallbang)");
+            }
+
             if (zombieClass == 4) {
                 bool hasSpit = g_bSpitterHasSpit[victim];
                 g_bSpitterHasSpit[victim] = false;
@@ -2133,15 +2140,15 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                     UpdateWeaponStat(attacker, clean, 20);
                     
                     if (isHeadshot) {
-                        LogActivity("%s killed a Spitter before she could spit with %s (Headshot)%s.", sAttacker, prettyWPN, sBreakdown);
+                        LogActivity("%s killed a Spitter before she could spit with %s (Headshot)%s%s.", sAttacker, prettyWPN, sWallbang, sBreakdown);
                     } else {
-                        LogActivity("%s killed a Spitter before she could spit with %s%s.", sAttacker, prettyWPN, sBreakdown);
+                        LogActivity("%s killed a Spitter before she could spit with %s%s%s.", sAttacker, prettyWPN, sWallbang, sBreakdown);
                     }
                 } else {
                     if (isHeadshot) {
-                        LogActivity("%s killed %s (Spitter) with %s (Headshot)%s.", sAttacker, sVictim, prettyWPN, sBreakdown);
+                        LogActivity("%s killed %s (Spitter) with %s (Headshot)%s%s.", sAttacker, sVictim, prettyWPN, sWallbang, sBreakdown);
                     } else {
-                        LogActivity("%s killed %s (Spitter) with %s%s.", sAttacker, sVictim, prettyWPN, sBreakdown);
+                        LogActivity("%s killed %s (Spitter) with %s%s%s.", sAttacker, sVictim, prettyWPN, sWallbang, sBreakdown);
                     }
                 }
             }
@@ -2155,9 +2162,9 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 }
 
                 if (isHeadshot) {
-                    LogActivity("%s killed %s (%s) with %s (Headshot)%s.", sAttacker, sVictim, sInfected, prettyWPN, sBreakdown);
+                    LogActivity("%s killed %s (%s) with %s (Headshot)%s%s.", sAttacker, sVictim, sInfected, prettyWPN, sWallbang, sBreakdown);
                 } else {
-                    LogActivity("%s killed %s (%s) with %s%s.", sAttacker, sVictim, sInfected, prettyWPN, sBreakdown);
+                    LogActivity("%s killed %s (%s) with %s%s%s.", sAttacker, sVictim, sInfected, prettyWPN, sWallbang, sBreakdown);
                 }
             }
         }
@@ -6870,4 +6877,44 @@ void GetSIDamageBreakdown(int victim, int killer, char[] buffer, int maxlen)
     } else {
         Format(buffer, maxlen, " (Dealt %d dmg)", killerDmg);
     }
+}
+
+// ====================================================================================================
+//                  SI WALLBANG ACTIVITY LOG HELPER
+// ====================================================================================================
+public bool Filter_IgnorePlayersAndInfected(int entity, int contentsMask, any data)
+{
+    if (entity == data) return false; 
+    
+    if (entity > 0 && entity <= MaxClients) return false;
+    
+    if (entity > 0 && entity < MAX_ENTITIES_TRACKED) {
+        if (g_bIsCommonEntity[entity]) return false;
+    }
+    
+    return true;
+}
+
+bool IsWallbangKill(int attacker, int victim)
+{
+    if (attacker <= 0 || attacker > MaxClients || !IsClientInGame(attacker) || !IsPlayerAlive(attacker)) return false;
+    if (victim <= 0 || victim > MaxClients || !IsClientInGame(victim)) return false;
+    
+    float vAttacker[3], vVictim[3];
+    GetClientEyePosition(attacker, vAttacker);
+    GetClientEyePosition(victim, vVictim);
+    
+    Handle hTrace = TR_TraceRayFilterEx(vAttacker, vVictim, MASK_SHOT, RayType_EndPoint, Filter_IgnorePlayersAndInfected, attacker);
+    if (hTrace != null)
+    {
+        bool bHit = TR_DidHit(hTrace);
+        float fraction = TR_GetFraction(hTrace);
+        delete hTrace;
+        
+        if (bHit && fraction < 0.99)
+        {
+            return true;
+        }
+    }
+    return false;
 }
