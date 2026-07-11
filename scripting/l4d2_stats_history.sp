@@ -501,6 +501,7 @@ public void OnPluginStart()
     HookEvent("charger_pummel_start", Event_PinStart);
 
     HookEvent("tongue_release",       Event_PinStop);
+	HookEvent("tongue_broke_bent",    Event_PinStop);
 	HookEvent("choke_stopped",        Event_PinStop);
 	
     HookEvent("tongue_pull_stopped",  Event_PinStop);
@@ -3918,6 +3919,30 @@ void GetPinEventPlayers(Event event, const char[] name, int &victim, int &attack
     {
         attacker = GetClientOfUserId(event.GetInt("userid"));
         victim = GetClientOfUserId(event.GetInt("victim"));
+        
+        if (victim <= 0 && attacker > 0 && attacker <= MaxClients)
+        {
+            for (int i = 1; i <= MaxClients; i++) {
+                if (g_iPinnedBy[i] == attacker) {
+                    victim = i;
+                    break;
+                }
+            }
+        }
+    }
+    else if (StrEqual(name, "tongue_broke_bent"))
+    {
+        attacker = GetClientOfUserId(event.GetInt("userid"));
+        
+        if (attacker > 0 && attacker <= MaxClients)
+        {
+            for (int i = 1; i <= MaxClients; i++) {
+                if (g_iPinnedBy[i] == attacker) {
+                    victim = i;
+                    break;
+                }
+            }
+        }
     }
     else if (StrEqual(name, "tongue_pull_stopped"))
     {
@@ -3925,7 +3950,7 @@ void GetPinEventPlayers(Event event, const char[] name, int &victim, int &attack
         attacker = GetClientOfUserId(event.GetInt("smoker"));
         rescuer = GetClientOfUserId(event.GetInt("userid"));
     }
-	else if (StrEqual(name, "choke_stopped"))
+    else if (StrEqual(name, "choke_stopped"))
     {
         victim = GetClientOfUserId(event.GetInt("victim"));
         attacker = GetClientOfUserId(event.GetInt("smoker"));
@@ -3948,7 +3973,7 @@ void GetPinEventPlayers(Event event, const char[] name, int &victim, int &attack
         victim = GetClientOfUserId(event.GetInt("victim"));
         rescuer = GetClientOfUserId(event.GetInt("rescuer"));
     }
-	else if (StrEqual(name, "charger_carry_end"))
+    else if (StrEqual(name, "charger_carry_end"))
     {
         attacker = GetClientOfUserId(event.GetInt("userid"));
         victim = GetClientOfUserId(event.GetInt("victim"));
