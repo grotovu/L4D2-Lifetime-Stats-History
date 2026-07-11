@@ -398,7 +398,7 @@ public void OnPluginStart()
 	g_cvPillsDecay = FindConVar("pain_pills_decay_rate");
 	
 	g_smGuns = new StringMap();
-    static const char guns[][] = { "m16_rifle", "rifle_ak47", "rifle_desert", "rifle_sg552", "smg", "smg_silenced", "smg_mp5", "pumpshotgun", "shotgun_chrome", "autoshotgun", "shotgun_spas", "hunting_rifle", "sniper_military", "sniper_awp", "sniper_scout", "pistol", "pistol_magnum", "m60", "grenade_launcher" };
+    static const char guns[][] = { "m16_rifle", "rifle_ak47", "rifle_desert", "rifle_sg552", "smg", "smg_silenced", "smg_mp5", "pumpshotgun", "shotgun_chrome", "autoshotgun", "shotgun_spas", "hunting_rifle", "sniper_military", "sniper_awp", "sniper_scout", "pistol", "pistol_magnum", "m60", "grenade_launcher", "minigun" };
     for (int i = 0; i < sizeof(guns); i++) g_smGuns.SetValue(guns[i], true);
 
     g_smMelees = new StringMap();
@@ -645,6 +645,9 @@ void InitWeaponMap()
     MapWeapon("weapon_molotov", "fire");
 	MapWeapon("Fireworkcrate", "fire");
 	MapWeapon("fire_cracker_blast", "fire");
+	MapWeapon("prop_fuel_barrel", "fire");
+    MapWeapon("fuel_barrel", "fire");
+    MapWeapon("barrel_fuel", "fire");
 	
 	MapWeapon("pipe_bomb", "pipe_bomb");
     MapWeapon("pipe_bomb_projectile", "pipe_bomb");
@@ -656,6 +659,10 @@ void InitWeaponMap()
 	
     MapWeapon("vomitjar", "vomitjar");
     MapWeapon("weapon_vomitjar", "vomitjar");
+	
+	MapWeapon("prop_minigun", "minigun");
+    MapWeapon("prop_minigun_l4d1", "minigun");
+    MapWeapon("prop_mounted_machine_gun", "minigun");
 
     MapWeapon("fireaxe", "fireaxe");
     MapWeapon("katana", "katana");
@@ -3825,6 +3832,8 @@ void GetPrettyWeaponName(const char[] classname, char[] buffer, int maxlen) {
     
     else if (StrEqual(classname, "grenade_launcher")) strcopy(buffer, maxlen, "Grenade Launcher");
     else if (StrEqual(classname, "chainsaw")) strcopy(buffer, maxlen, "Chainsaw");
+	
+	else if (StrEqual(classname, "minigun")) strcopy(buffer, maxlen, "Mounted Minigun");
     
     else if (StrEqual(classname, "guitar")) strcopy(buffer, maxlen, "Electric Guitar");
     else if (StrEqual(classname, "fireaxe")) strcopy(buffer, maxlen, "Fireaxe");
@@ -4267,7 +4276,9 @@ public Action CmdShowHistory(int client, int args)
         g_Lifetime[client].campaignsPlayed = g_Lifetime[client].campaignsWon;
     }
 
-    int totalKills = 0, gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
+    int totalSI = g_Lifetime[client].killsSmoker + g_Lifetime[client].killsHunter + g_Lifetime[client].killsBoomer + g_Lifetime[client].killsCharger + g_Lifetime[client].killsJockey + g_Lifetime[client].killsSpitter + g_Lifetime[client].killsTank + g_Lifetime[client].killsWitch;
+    int totalKills = g_Lifetime[client].killsCommon + totalSI;
+    int gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
     int favT1 = 0, favT2 = 0, favT3 = 0, favSec = 0;
     char sFavT1[64], sFavT2[64], sFavT3[64], sFavSec[64];
 	
@@ -4278,8 +4289,6 @@ public Action CmdShowHistory(int client, int args)
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
 		
         if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
-		
-        totalKills += wS.kills;
 
         if (IsGun(key) || StrEqual(key, "chainsaw")) gunKills += wS.kills;
         else if (IsMelee(key)) meleeKills += wS.kills;
@@ -4293,9 +4302,6 @@ public Action CmdShowHistory(int client, int args)
         else if (tier == 3 && wS.kills > favT3) { favT3 = wS.kills; strcopy(sFavT3, sizeof(sFavT3), key); }
         else if (tier == 4 && wS.kills > favSec) { favSec = wS.kills; strcopy(sFavSec, sizeof(sFavSec), key); }
     }
-	
-    totalKills += g_Lifetime[client].molotovKills;
-    totalKills += g_Lifetime[client].pipeKills;
 
     int totalS = g_Lifetime[client].totalSeconds;
     int h = totalS / 3600, m = (totalS % 3600) / 60;
@@ -4339,7 +4345,6 @@ public Action CmdShowHistory(int client, int args)
     PrintToConsole(client, " Bile Jars:          %d Thrown (Avg: %.1f) / %d Direct Hits (Avg: %.1f)\n", g_Lifetime[client].bilesThrown, float(g_Lifetime[client].bilesThrown) / cp_f, g_Lifetime[client].bileHits, float(g_Lifetime[client].bileHits) / cp_f);
 
     PrintToConsole(client, " [ INFECTED KILLED ]");
-	int totalSI = g_Lifetime[client].killsSmoker + g_Lifetime[client].killsHunter + g_Lifetime[client].killsBoomer + g_Lifetime[client].killsCharger + g_Lifetime[client].killsJockey + g_Lifetime[client].killsSpitter + g_Lifetime[client].killsTank + g_Lifetime[client].killsWitch;
     PrintToConsole(client, " Common Infected:    %d  (Avg: %.1f)", g_Lifetime[client].killsCommon, float(g_Lifetime[client].killsCommon) / cp_f);
 	PrintToConsole(client, " Special Infected:   %d  (Avg: %.1f)", totalSI, float(totalSI) / cp_f);
     PrintToConsole(client, " Tanks:              %d  (Avg: %.1f)  / Damage Dealt: %d (Avg: %.1f)", g_Lifetime[client].killsTank, float(g_Lifetime[client].killsTank) / cp_f, g_Lifetime[client].tankDamage, float(g_Lifetime[client].tankDamage) / cp_f);
@@ -4434,7 +4439,9 @@ public Action CmdShowCampaignHistory(int client, int args)
         g_Campaign[client].campaignsPlayed = g_Campaign[client].campaignsWon;
     }
 
-    int totalKills = 0, gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
+    int totalSI = g_Campaign[client].killsSmoker + g_Campaign[client].killsHunter + g_Campaign[client].killsBoomer + g_Campaign[client].killsCharger + g_Campaign[client].killsJockey + g_Campaign[client].killsSpitter + g_Campaign[client].killsTank + g_Campaign[client].killsWitch;
+    int totalKills = g_Campaign[client].killsCommon + totalSI;
+    int gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
     int favT1 = 0, favT2 = 0, favT3 = 0, favSec = 0;
     char sFavT1[64], sFavT2[64], sFavT3[64], sFavSec[64];
 	
@@ -4445,8 +4452,6 @@ public Action CmdShowCampaignHistory(int client, int args)
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
 		
         if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
-		
-        totalKills += wS.kills;
 
         if (IsGun(key) || StrEqual(key, "chainsaw")) gunKills += wS.kills;
         else if (IsMelee(key)) meleeKills += wS.kills;
@@ -4460,9 +4465,6 @@ public Action CmdShowCampaignHistory(int client, int args)
         else if (tier == 3 && wS.kills > favT3) { favT3 = wS.kills; strcopy(sFavT3, sizeof(sFavT3), key); }
         else if (tier == 4 && wS.kills > favSec) { favSec = wS.kills; strcopy(sFavSec, sizeof(sFavSec), key); }
     }
-	
-    totalKills += g_Campaign[client].molotovKills;
-    totalKills += g_Campaign[client].pipeKills;
 
     int totalS = g_Campaign[client].totalSeconds;
     int h = totalS / 3600, m = (totalS % 3600) / 60;
@@ -4506,7 +4508,6 @@ public Action CmdShowCampaignHistory(int client, int args)
     PrintToConsole(client, " Bile Jars:          %d Thrown (Avg: %.1f) / %d Direct Hits (Avg: %.1f)\n", g_Campaign[client].bilesThrown, float(g_Campaign[client].bilesThrown) / cp_f, g_Campaign[client].bileHits, float(g_Campaign[client].bileHits) / cp_f);
 
     PrintToConsole(client, " [ INFECTED KILLED ]");
-	int totalSI = g_Campaign[client].killsSmoker + g_Campaign[client].killsHunter + g_Campaign[client].killsBoomer + g_Campaign[client].killsCharger + g_Campaign[client].killsJockey + g_Campaign[client].killsSpitter + g_Campaign[client].killsTank + g_Campaign[client].killsWitch;
 	PrintToConsole(client, " Common Infected:    %d  (Avg: %.1f)", g_Campaign[client].killsCommon, float(g_Campaign[client].killsCommon) / cp_f);
     PrintToConsole(client, " Special Infected:   %d  (Avg: %.1f)", totalSI, float(totalSI) / cp_f);    
     PrintToConsole(client, " Tanks:              %d  (Avg: %.1f)  / Damage Dealt: %d (Avg: %.1f)", g_Campaign[client].killsTank, float(g_Campaign[client].killsTank) / cp_f, g_Campaign[client].tankDamage, float(g_Campaign[client].tankDamage) / cp_f);
@@ -4830,7 +4831,9 @@ void GeneratePrintFile(int client, bool isAuto)
     File hFile = OpenFile(sPath, "w");
     if (hFile == null) return;
 
-    int totalKills = 0, gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
+    int totalSI = g_Lifetime[client].killsSmoker + g_Lifetime[client].killsHunter + g_Lifetime[client].killsBoomer + g_Lifetime[client].killsCharger + g_Lifetime[client].killsJockey + g_Lifetime[client].killsSpitter + g_Lifetime[client].killsTank + g_Lifetime[client].killsWitch;
+    int totalKills = g_Lifetime[client].killsCommon + totalSI;
+    int gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
     int favT1 = 0, favT2 = 0, favT3 = 0, favSec = 0;
     char sFavT1[64], sFavT2[64], sFavT3[64], sFavSec[64];
     
@@ -4841,8 +4844,6 @@ void GeneratePrintFile(int client, bool isAuto)
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
         
         if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
-         
-        totalKills += wS.kills;
 
         if (IsGun(key) || StrEqual(key, "chainsaw")) gunKills += wS.kills;
         else if (IsMelee(key)) meleeKills += wS.kills;
@@ -4855,9 +4856,6 @@ void GeneratePrintFile(int client, bool isAuto)
         else if (tier == 3 && wS.kills > favT3) { favT3 = wS.kills; strcopy(sFavT3, sizeof(sFavT3), key); }
         else if (tier == 4 && wS.kills > favSec) { favSec = wS.kills; strcopy(sFavSec, sizeof(sFavSec), key); }
     }
-    
-    totalKills += g_Lifetime[client].molotovKills;
-    totalKills += g_Lifetime[client].pipeKills;
 
     int totalS = g_Lifetime[client].totalSeconds;
     int h = totalS / 3600, m = (totalS % 3600) / 60;
@@ -4954,7 +4952,7 @@ void GeneratePrintFile(int client, bool isAuto)
     
     hFile.WriteLine("[ INFECTED KILLED ]");
     
-    int totalSI = g_Lifetime[client].killsSmoker + g_Lifetime[client].killsHunter + g_Lifetime[client].killsBoomer + g_Lifetime[client].killsCharger + g_Lifetime[client].killsJockey + g_Lifetime[client].killsSpitter + g_Lifetime[client].killsTank + g_Lifetime[client].killsWitch;
+    totalSI = g_Lifetime[client].killsSmoker + g_Lifetime[client].killsHunter + g_Lifetime[client].killsBoomer + g_Lifetime[client].killsCharger + g_Lifetime[client].killsJockey + g_Lifetime[client].killsSpitter + g_Lifetime[client].killsTank + g_Lifetime[client].killsWitch;
     
     Format(lineBuffer, sizeof(lineBuffer), "Common Infected:    %d  (Avg: %.1f)", g_Lifetime[client].killsCommon, float(g_Lifetime[client].killsCommon) / cp_f);
     hFile.WriteLine(lineBuffer);
@@ -5107,7 +5105,9 @@ void GenerateCampaignPrintFile(int client)
     File hFile = OpenFile(sPath, "w");
     if (hFile == null) return;
 
-    int totalKills = 0, gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
+    int totalSI = g_Campaign[client].killsSmoker + g_Campaign[client].killsHunter + g_Campaign[client].killsBoomer + g_Campaign[client].killsCharger + g_Campaign[client].killsJockey + g_Campaign[client].killsSpitter + g_Campaign[client].killsTank + g_Campaign[client].killsWitch;
+    int totalKills = g_Campaign[client].killsCommon + totalSI;
+    int gunKills = 0, meleeKills = 0, bulletKills = 0, shellKills = 0;
     int favT1 = 0, favT2 = 0, favT3 = 0, favSec = 0;
     char sFavT1[64], sFavT2[64], sFavT3[64], sFavSec[64];
 	
@@ -5118,8 +5118,6 @@ void GenerateCampaignPrintFile(int client)
         strcopy(key, sizeof(key), g_sCleanWeaponNames[i]);
 		
         if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
-		 
-        totalKills += wS.kills;
 
         if (IsGun(key) || StrEqual(key, "chainsaw")) gunKills += wS.kills;
         else if (IsMelee(key)) meleeKills += wS.kills;
@@ -5132,9 +5130,6 @@ void GenerateCampaignPrintFile(int client)
         else if (tier == 3 && wS.kills > favT3) { favT3 = wS.kills; strcopy(sFavT3, sizeof(sFavT3), key); }
         else if (tier == 4 && wS.kills > favSec) { favSec = wS.kills; strcopy(sFavSec, sizeof(sFavSec), key); }
     }
-	
-    totalKills += g_Campaign[client].molotovKills;
-    totalKills += g_Campaign[client].pipeKills;
 
     int totalS = g_Campaign[client].totalSeconds;
     int h = totalS / 3600, m = (totalS % 3600) / 60;
@@ -5233,8 +5228,6 @@ void GenerateCampaignPrintFile(int client)
     hFile.WriteLine(lineBuffer);
 	
     hFile.WriteLine("[ INFECTED KILLED ]");
-	
-    int totalSI = g_Campaign[client].killsSmoker + g_Campaign[client].killsHunter + g_Campaign[client].killsBoomer + g_Campaign[client].killsCharger + g_Campaign[client].killsJockey + g_Campaign[client].killsSpitter + g_Campaign[client].killsTank + g_Campaign[client].killsWitch;
     
     Format(lineBuffer, sizeof(lineBuffer), "Common Infected:    %d  (Avg: %.1f)", g_Campaign[client].killsCommon, float(g_Campaign[client].killsCommon) / cp_f);
     hFile.WriteLine(lineBuffer);
@@ -5374,17 +5367,8 @@ void GenerateCampaignPrintFile(int client)
             int botSeconds = g_BotCampaign[i].totalSeconds;
             int hS = botSeconds / 3600, mS = (botSeconds % 3600) / 60;
 			
-            int botTotalKills = g_BotCampaign[i].molotovKills + g_BotCampaign[i].pipeKills;
-            for (int w = 0; w < g_iCleanWeaponCount; w++) {
-                WeaponStats wS;
-                wS = g_WeaponBotCampaignCache[i][w];
-                char key[64];
-                strcopy(key, sizeof(key), g_sCleanWeaponNames[w]);
-                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
-                botTotalKills += wS.kills;
-            }
-			
             int botSI = g_BotCampaign[i].killsSmoker + g_BotCampaign[i].killsHunter + g_BotCampaign[i].killsBoomer + g_BotCampaign[i].killsCharger + g_BotCampaign[i].killsJockey + g_BotCampaign[i].killsSpitter + g_BotCampaign[i].killsTank + g_BotCampaign[i].killsWitch;
+            int botTotalKills = g_BotCampaign[i].killsCommon + botSI;
 			
             Format(lineBuffer, sizeof(lineBuffer), " [ %s (BOT) ]", botName);
             hFile.WriteLine(lineBuffer);
@@ -5610,17 +5594,8 @@ public Action CmdShowBotsCampaignHistory(int client, int args)
             int totalS = g_BotCampaign[i].totalSeconds;
             int h = totalS / 3600, m = (totalS % 3600) / 60;
 			
-            int totalKills = g_BotCampaign[i].molotovKills + g_BotCampaign[i].pipeKills;
-            for (int w = 0; w < g_iCleanWeaponCount; w++) {
-                WeaponStats wS;
-                wS = g_WeaponBotCampaignCache[i][w];
-                char key[64];
-                strcopy(key, sizeof(key), g_sCleanWeaponNames[w]);
-                if (StrEqual(key, "pipe_bomb") || StrEqual(key, "vomitjar") || StrEqual(key, "fire") || IsCarryableObject(key)) continue;
-                totalKills += wS.kills;
-            }
-
             int botSI = g_BotCampaign[i].killsSmoker + g_BotCampaign[i].killsHunter + g_BotCampaign[i].killsBoomer + g_BotCampaign[i].killsCharger + g_BotCampaign[i].killsJockey + g_BotCampaign[i].killsSpitter + g_BotCampaign[i].killsTank + g_BotCampaign[i].killsWitch;
+            int totalKills = g_BotCampaign[i].killsCommon + botSI;
 			
             PrintToConsole(client, " \n [ %s (BOT) ]", botName);
             PrintToConsole(client, "  Playtime:        %d hours, %d minutes | Kills: %d | Incaps: %d / Deaths: %d / Restarts: %d", h, m, totalKills, g_BotCampaign[i].incaps, g_BotCampaign[i].deaths, g_BotCampaign[i].totalRestarts);
@@ -5628,7 +5603,6 @@ public Action CmdShowBotsCampaignHistory(int client, int args)
             PrintToConsole(client, "  SI Breakdown:    Sm:%-3d /  Hu:%-3d /  Bo:%-3d /  Ch:%-3d /  Jo:%-3d /  Sp:%-3d", g_BotCampaign[i].killsSmoker, g_BotCampaign[i].killsHunter, g_BotCampaign[i].killsBoomer, g_BotCampaign[i].killsCharger, g_BotCampaign[i].killsJockey, g_BotCampaign[i].killsSpitter);
             PrintToConsole(client, "  Teamplay Feats:  Revives:%-3d /  Heals:%-3d /  Defibs:%-3d /  Protections:%-3d", g_BotCampaign[i].revivesTotal, g_BotCampaign[i].medkitsUsed + g_BotCampaign[i].medkitsShared, g_BotCampaign[i].defibsUsed, g_BotCampaign[i].protectionsTotal);
             PrintToConsole(client, "                   Ledge Grabs:%-3d /  Ledge Rescues:%-3d /  Closet Rescues:%-3d /  Rescued from Closet:%-3d", g_BotCampaign[i].ledgeGrabs, g_BotCampaign[i].ledgeRescues, g_BotCampaign[i].closetRescues, g_BotCampaign[i].rescuedFromCloset);
-            PrintToConsole(client, "  Throwables:      Moly Thrown: %-2d (%-3d Kills) | Pipe Thrown: %-2d (%-3d Kills) | Bile Thrown: %-2d", g_BotCampaign[i].molotovsThrown, g_BotCampaign[i].molotovKills, g_BotCampaign[i].pipesThrown, g_BotCampaign[i].pipeKills, g_BotCampaign[i].bilesThrown);
             PrintToConsole(client, "  Throwables:      Moly Thrown: %-2d (%-3d Kills) | Pipe Thrown: %-2d (%-3d Kills) | Bile Thrown: %-2d", g_BotCampaign[i].molotovsThrown, g_BotCampaign[i].molotovKills, g_BotCampaign[i].pipesThrown, g_BotCampaign[i].pipeKills, g_BotCampaign[i].bilesThrown);
             PrintToConsole(client, "  Dmg Dealt:       Tank:%-6d /  Witch:%-6d", g_BotCampaign[i].tankDamage, g_BotCampaign[i].witchDamage);
             PrintToConsole(client, "  Dmg Received:    Total:%-5d HP", GetTotalDamageReceived(g_iDamageBotCampaignCache[i]));
