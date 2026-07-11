@@ -1966,6 +1966,16 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
         }
     }
 	
+	char sDistance[32];
+    sDistance[0] = '\0';
+    if (victim > 0 && victim <= MaxClients && IsClientInGame(victim) && attacker > 0 && attacker <= MaxClients && IsClientInGame(attacker)) {
+        float vAttacker[3], vVictim[3];
+        GetClientEyePosition(attacker, vAttacker);
+        GetClientEyePosition(victim, vVictim);
+        float dist = GetVectorDistance(vAttacker, vVictim);
+        Format(sDistance, sizeof(sDistance), " (Distance: %d units)", RoundToNearest(dist));
+    }
+	
 	char sWallbang[16];
     sWallbang[0] = '\0';
 	
@@ -2067,9 +2077,9 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                     }
                     
                     if (event.GetBool("headshot")) {
-                        LogActivity("%s saved %s by killing the %s with %s (Headshot)%s.", sRescuer, sVictim, sInfected, prettyWPN, sBreakdown);
+                        LogActivity("%s saved %s by killing the %s with %s (Headshot)%s%s.", sRescuer, sVictim, sInfected, prettyWPN, sDistance, sBreakdown);
                     } else {
-                        LogActivity("%s saved %s by killing the %s with %s%s.", sRescuer, sVictim, sInfected, prettyWPN, sBreakdown);
+                        LogActivity("%s saved %s by killing the %s with %s%s%s.", sRescuer, sVictim, sInfected, prettyWPN, sDistance, sBreakdown);
                     }
                     
                     bIsSpecialFeat = true;
@@ -2090,7 +2100,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                         char sName[32], prettyWPN[64];
                         GetPlayerNameSafe(rescuer, sName, sizeof(sName));
                         GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-                        LogActivity("%s self-rescued by killing the Smoker with %s%s.", sName, prettyWPN, sBreakdown);
+                        LogActivity("%s self-rescued by killing the Smoker with %s%s%s.", sName, prettyWPN, sDistance, sBreakdown);
                         
                         bIsSpecialFeat = true;
                     }
@@ -2140,15 +2150,15 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                     UpdateWeaponStat(attacker, clean, 20);
                     
                     if (isHeadshot) {
-                        LogActivity("%s killed a Spitter before she could spit with %s (Headshot)%s%s.", sAttacker, prettyWPN, sWallbang, sBreakdown);
+                        LogActivity("%s killed a Spitter before she could spit with %s (Headshot)%s%s%s.", sAttacker, prettyWPN, sWallbang, sDistance, sBreakdown);
                     } else {
-                        LogActivity("%s killed a Spitter before she could spit with %s%s%s.", sAttacker, prettyWPN, sWallbang, sBreakdown);
+                        LogActivity("%s killed a Spitter before she could spit with %s%s%s%s.", sAttacker, prettyWPN, sWallbang, sDistance, sBreakdown);
                     }
                 } else {
                     if (isHeadshot) {
-                        LogActivity("%s killed %s (Spitter) with %s (Headshot)%s%s.", sAttacker, sVictim, prettyWPN, sWallbang, sBreakdown);
+                        LogActivity("%s killed %s (Spitter) with %s (Headshot)%s%s%s.", sAttacker, sVictim, prettyWPN, sWallbang, sDistance, sBreakdown);
                     } else {
-                        LogActivity("%s killed %s (Spitter) with %s%s%s.", sAttacker, sVictim, prettyWPN, sWallbang, sBreakdown);
+                        LogActivity("%s killed %s (Spitter) with %s%s%s%s.", sAttacker, sVictim, prettyWPN, sWallbang, sDistance, sBreakdown);
                     }
                 }
             }
@@ -2162,9 +2172,9 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 }
 
                 if (isHeadshot) {
-                    LogActivity("%s killed %s (%s) with %s (Headshot)%s%s.", sAttacker, sVictim, sInfected, prettyWPN, sWallbang, sBreakdown);
+                    LogActivity("%s killed %s (%s) with %s (Headshot)%s%s%s.", sAttacker, sVictim, sInfected, prettyWPN, sWallbang, sDistance, sBreakdown);
                 } else {
-                    LogActivity("%s killed %s (%s) with %s%s%s.", sAttacker, sVictim, sInfected, prettyWPN, sWallbang, sBreakdown);
+                    LogActivity("%s killed %s (%s) with %s%s%s%s.", sAttacker, sVictim, sInfected, prettyWPN, sWallbang, sDistance, sBreakdown);
                 }
             }
         }
@@ -2193,7 +2203,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 char sAttacker[32], prettyWPN[64];
                 GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
                 GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-                LogActivity("%s skeeted a Hunter with %s%s.", sAttacker, prettyWPN, sBreakdown);
+                LogActivity("%s skeeted a Hunter with %s%s%s.", sAttacker, prettyWPN, sDistance, sBreakdown);
             }
         }
         case 4: 
@@ -2218,7 +2228,7 @@ void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast) {
                 char sAttacker[32], prettyWPN[64];
                 GetPlayerNameSafe(attacker, sAttacker, sizeof(sAttacker));
                 GetPrettyWeaponName(clean, prettyWPN, sizeof(prettyWPN));
-                LogActivity("%s leveled a Charger with %s%s.", sAttacker, prettyWPN, sBreakdown);
+                LogActivity("%s leveled a Charger with %s%s%s.", sAttacker, prettyWPN, sDistance, sBreakdown);
             }
         }
         case 8: 
