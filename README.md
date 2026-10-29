@@ -66,6 +66,13 @@ Tracks damage absorbed across 18 individual damage categories with tick-damage a
 - Smoker, Hunter, Boomer, Jockey, Charger, Spitter Acid.
 - Friendly Fire, Fall Damage, Environmental Fire, Self-Inflicted Fire, Map Hazards (`trigger_hurt`), Incapacitation Bleed-out, Self Damage, and World / Physics Impacts.
 
+> ℹ️ **Notice: Damage Taken vs. Vanilla Stats Crawl**
+> You may notice that the total damage received reported by this tracker is higher than the number shown on the vanilla Left 4 Dead 2 end-of-campaign credits crawl.
+>
+> In the vanilla engine, instant-incapacitation strikes—such as a Witch claw or a direct Tank rock on Expert difficulty—bypass traditional health subtraction and instantly transition the survivor into an incapacitated state. As a result, the base game fails to register that lost health pool as raw damage taken. 
+>
+> This plugin measures exact effective health transitions (`Pre-Damage HP → Post-Damage HP`). When a Witch or Tank rock strips your entire remaining health bar in a single blow, the exact HP lost is captured and assigned to its respective damage source, providing a much more accurate representation of actual damage absorbed.
+
 <p align="center">
 <img width="1072" height="798" alt="image" src="https://github.com/user-attachments/assets/1941ac02-0f63-4624-bd15-8cdd9216e49e" />
   <br>
