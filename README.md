@@ -66,6 +66,15 @@ Tracks damage absorbed across 18 individual damage categories with tick-damage a
 - Smoker, Hunter, Boomer, Jockey, Charger, Spitter Acid.
 - Friendly Fire, Fall Damage, Environmental Fire, Self-Inflicted Fire, Map Hazards (`trigger_hurt`), Incapacitation Bleed-out, Self Damage, and World / Physics Impacts.
 
+<p align="center">
+<img width="1072" height="798" alt="image" src="https://github.com/user-attachments/assets/1941ac02-0f63-4624-bd15-8cdd9216e49e" />
+  <br>
+  <em>https://www.youtube.com/watch?v=pqHlzEpTL8w</em>
+  <br>
+  <em>The video shows 2 zombies aligned enough for 1 pistol bullet killing them both with headshots.</em>
+</p>
+
+
 ---
 
 ## 📜 Match Activity Log (Real-Time Narrative)
