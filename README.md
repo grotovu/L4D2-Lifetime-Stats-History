@@ -128,7 +128,7 @@ The activity engine logs events with timestamps `[HH:MM:SS]` into a chronologica
 
 Bot companions are fully tracked across the campaign:
 - Tracks individual bot character identities (Nick, Rochelle, Coach, Ellis, Bill, Zoey, Francis, Louis, or expanded survivor slots).
-- Compatible with custom bot naming plugins (`l4d2_custom_bot_name_*`).
+- Compatible with my custom bot naming plugin (`l4d2_custom_bot_name_*`).
 - Displays bot accuracy, kills, revives, medkits shared, throwables, damage dealt, damage taken, and feats via `!showbotsstatsforcampaign`.
 
 ---
