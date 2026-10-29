@@ -115,7 +115,7 @@ The activity engine logs events with timestamps `[HH:MM:SS]` into a chronologica
   <br>
   <em>https://www.youtube.com/watch?v=YkNhIbct9nM</em>
   <br>
-  <em>On 00:18:23, I, Rei'sen II, got pounced by a Hunter and all three bots simultaneously shoved him. Seiran's shove killed him.</em>
+  <em>On [00:18:23], I, Rei'sen II, got pounced by a Hunter and all three bots simultaneously shoved him. Seiran's shove killed him. Not in video.</em>
 </p>
 
 
