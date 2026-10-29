@@ -101,6 +101,13 @@ The activity engine logs events with timestamps `[HH:MM:SS]` into a chronologica
   - **Dark Carnival:** Winning Gnome Chompski at the shooting gallery, ringing the Strongman bell, punching clowns, winning Stashwhacker, and escaping alive with the Gnome.
 - **Roster Tracking:** Logs who survived vs. who died at chapter transitions, player-to-bot transitions, and finale rescue/death rosters.
 
+<p align="center">
+<img width="1068" height="815" alt="image" src="https://github.com/user-attachments/assets/90d85144-f745-46de-81d8-1b31bc70ff00" />
+  <br>
+  <em>https://www.youtube.com/watch?v=YkNhIbct9nM</em>
+</p>
+
+
 ---
 
 ## 🤖 Survivor Bot Tracking
